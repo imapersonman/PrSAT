@@ -1,0 +1,88 @@
+.has-error {
+  border-color: red;
+}
+
+.multi-input > * {
+  margin-bottom: 0.4em;
+}
+
+.single-input {
+  display: flex;
+  width: fit-content;
+  padding: 0.3em;
+  border-radius: 0.4em;
+  background-color: gainsboro;
+  cursor: pointer;
+}
+
+.single-input > * > *:not(:first-child), .single-input > *:not(:first-child) {
+  margin-left: 0.4em;
+}
+
+/* * > *:not(:first-child) {
+  margin-left: 0.4em;
+} */
+
+.single-input input.text {
+  font-family: monospace;
+  resize: both;
+  border-radius: 0.4em;
+}
+
+.single-input .constraint {
+  /* margin-left: 0.4em; */
+}
+
+.single-input .constraint.updating {
+  opacity: 0.3;
+}
+
+.single-input .close {
+  background-color:pink;
+  border-radius: 0.4em;
+}
+
+.single-input .newline {
+  background-color:palegreen;
+  border-radius: 0.4em;
+}
+
+.single-input.focused {
+  background-color:skyblue;
+}
+
+.single-input input[type=button].info {
+  background-color: gainsboro;
+  border-radius: 0.4em;
+}
+
+.single-input input[type=button].info.error {
+  color: red;
+  /* font-style: italic; */
+}
+
+input[type=button].generate {
+  background-color: gainsboro;
+  border-radius: 0.4em;
+}
+
+.model-container table {
+  margin-top: 0.4em;
+  border-collapse: collapse;
+  border: solid black;
+  border-radius: 0.4em;
+}
+
+.model-container table thead th {
+  border: solid black;
+  padding: 0.2em;
+}
+
+.model-container table tbody tr {
+  border: solid black;
+}
+
+.model-container table tbody tr td {
+  border: solid black;
+  padding: 0.2em;
+}

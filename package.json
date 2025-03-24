@@ -1,0 +1,26 @@
+{
+  "name": "html-first-shells",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "copy-files": "cp node_modules/z3-solver/build/z3-built.js node_modules/z3-solver/build/z3-built.wasm node_modules/z3-solver/build/z3-built.worker.js public",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest"
+  },
+  "devDependencies": {
+    "@types/parsimmon": "^1.10.9",
+    "@vitest/browser": "^2.1.8",
+    "jsdom": "^25.0.1",
+    "playwright": "^1.49.1",
+    "typescript": "~5.6.2",
+    "vite": "^6.2.0",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "parsimmon": "^1.18.1",
+    "z3-solver": "^4.14.0"
+  }
+}
