@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "copy-files": "cp node_modules/z3-solver/build/z3-built.js node_modules/z3-solver/build/z3-built.wasm node_modules/z3-solver/build/z3-built.worker.js public",
+    "copy-files": "cp node_modules/z3-solver/build/z3-built.js node_modules/z3-solver/build/z3-built.wasm public",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest"
