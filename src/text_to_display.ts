@@ -638,15 +638,16 @@ const main = <CtxKey extends string>(ctx: Context<CtxKey>): HTMLElement => {
         console.log('sat!')
         const model_html = await model_display(ctx, [tt, model])
         model_container.appendChild(model_html)
-
-        for (const constraint of all_constraints) {
-          const e = constraint_to_html(constraint)
-          model_container.appendChild(el('div', { style: 'margin-top: 0.4em;' }, e))
-        }
       } else {
         console.log(status)
         model_container.append(status)
       }
+
+      for (const constraint of all_constraints) {
+        const e = constraint_to_html(constraint)
+        model_container.appendChild(el('div', { style: 'margin-top: 0.4em;' }, e))
+      }
+
     } catch (e: any) {
       model_container.appendChild(el('div', { style: 'color: red;' },
         el('div', {}, 'Exception!'),
