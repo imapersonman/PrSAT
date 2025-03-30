@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'vitest'
 import { Model } from 'z3-solver'
-import { constraint_builder, real_expr_builder, sentence_builder } from './pr_sat'
+import { constraint_builder, parse_s, real_expr_builder, sentence_builder } from './pr_sat'
 import { init_z3, pr_sat } from './z3_integration'
 import { PrSat } from './types'
+import { S, s_to_string } from './s'
 
 type Sentence = PrSat['Sentence']
 type RealExpr = PrSat['RealExpr']
@@ -389,7 +390,7 @@ describe('z3', () => {
         const { status: sat, model: _ } = await pr_sat(Context('main'), constraints)
         expect(sat).toEqual('unsat')
       })
-      test.skip('s', async () => {
+      test('s', async () => {
         const { Context } = await init_z3()
         const constraints = desideratum(without_k(sk))
         const { status: sat, model: _ } = await pr_sat(Context('main'), constraints)
@@ -410,7 +411,7 @@ describe('z3', () => {
         const { status: sat, model: _ } = await pr_sat(Context('main'), constraints)
         expect(sat).toEqual('unsat')
       })
-      test.skip('i', async () => {
+      test('i', async () => {
         const { Context } = await init_z3()
         const constraints = desideratum(ik)
         const { status: sat, model: _ } = await pr_sat(Context('main'), constraints)
@@ -423,5 +424,53 @@ describe('z3', () => {
         expect(sat).toEqual('sat')
       })
     })
+  })
+})
+
+describe('smtlib-direct', () => {
+  const smtlib = `
+(set-logic QF_NRA)
+(declare-fun a2 () Real)
+(declare-fun a3 () Real)
+(declare-fun a4 () Real)
+(declare-fun a5 () Real)
+(declare-fun a6 () Real)
+(declare-fun a7 () Real)
+(declare-fun a8 () Real)
+(assert (and (= (+ (* (/ a6 (+ a2 a6)) (- 1)) (/ a8 (+ a5 a8))) (+ (* (/ (+ a4 a6) (- 1 a3 a5 a7 a8)) (- 1)) (/ (+ a7 a8) (+ a3 a5 a7 a8)))) (= (+ (* (/ a7 (+ a3 a7)) (- 1)) (/ a8 (+ a5 a8))) (+ (* (/ (+ a4 a7) (- 1 a2 a5 a6 a8)) (- 1)) (/ (+ a6 a8) (+ a2 a5 a6 a8)))) (<= (+ (* (/ (+ a4 a6 a7) (- 1 a5 a8)) (- 1)) (/ a8 (+ a5 a8))) (+ (* (/ (+ a4 a7) (- 1 a2 a5 a6 a8)) (- 1)) (/ (+ a6 a8) (+ a2 a5 a6 a8)))) (< 0 a2) (< 0 a3) (< 0 a4) (< 0 a5) (< 0 a6) (< 0 a7) (< 0 a8) (< 0 (+ (* (/ (+ a4 a6) (- 1 a3 a5 a7 a8)) (- 1)) (/ (+ a7 a8) (+ a3 a5 a7 a8)))) (< 0 (+ (* (/ (+ a4 a7) (- 1 a2 a5 a6 a8)) (- 1)) (/ (+ a6 a8) (+ a2 a5 a6 a8)))) (< a2 1) (< a3 1) (< a4 1) (< a5 1) (< a6 1) (< a7 1) (< a8 1) (< (+ a2 a3 a4 a5 a6 a7 a8) 1) (not (= (+ a2 a6) 0)) (not (= (+ a5 a8) 0)) (not (= (- 1 a3 a5 a7 a8) 0)) (not (= (+ a3 a5 a7 a8) 0)) (not (= (+ a3 a7) 0)) (not (= (+ a5 a8) 0)) (not (= (- 1 a2 a5 a6 a8) 0)) (not (= (+ a2 a5 a6 a8) 0)) (not (= (- 1 a5 a8) 0)) (not (= (+ a5 a8) 0)) (not (= (- 1 a2 a5 a6 a8) 0)) (not (= (+ a2 a5 a6 a8) 0)) (not (= (- 1 a3 a5 a7 a8) 0)) (not (= (+ a3 a5 a7 a8) 0)) (not (= (- 1 a2 a5 a6 a8) 0)) (not (= (+ a2 a5 a6 a8) 0))))
+(check-sat)
+(get-model)
+  `
+
+  const split_assertion_and = (text: string): string => {
+    const split_lines = text.trim().split('\n')
+    const s_lines: S[] = []
+    for (const l of split_lines) {
+      const l_as_s = parse_s(l)
+      if (Array.isArray(l_as_s) && l_as_s.length > 0 && l_as_s[0] === 'assert' && Array.isArray(l_as_s[1]) && l_as_s[1].length > 0 && l_as_s[1][0] === 'and') {
+        const and_operands = l_as_s[1].slice(1)
+        for (const operand of and_operands) {
+          s_lines.push(['assert', operand])
+        }
+      } else {
+        s_lines.push(l_as_s)
+      }
+    }
+    const result_lines = s_lines.map((s) => s_to_string(s, false))
+    return result_lines.join('\n')
+  }
+
+  test.only('confirmation measure s', async () => {
+    const { Context } = await init_z3()
+    const ctx = Context('main')
+    const { Solver } = ctx
+    const s = new Solver()
+
+    const expanded_and_stuff = split_assertion_and(smtlib)
+    // console.log(expanded_and_stuff)
+    s.fromString(expanded_and_stuff)
+
+    const result = await s.check()
+    expect(result).toEqual('sat')
   })
 })

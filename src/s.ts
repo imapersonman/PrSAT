@@ -12,15 +12,19 @@ type SAtom =
   | number
   | boolean
 
-export const s_to_string = (s: S): string => {
+export const s_to_string = (s: S, wrap_strings: boolean = true): string => {
   if (typeof s === 'string') {
-    return `'${s}'`
+    if (wrap_strings) {
+      return `'${s}'`
+    } else {
+      return `${s}`
+    }
   } else if (typeof s === 'number') {
     return s.toString()
   } else if (typeof s === 'boolean') {
     return s ? 'true' : 'false'
   } else if (Array.isArray(s)) {
-    return `(${s.map(s_to_string).join(' ')})`
+    return `(${s.map((s) => s_to_string(s, wrap_strings)).join(' ')})`
   } else {
     throw new Error('s_to_string fallthrough')
   }

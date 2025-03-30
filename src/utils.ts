@@ -114,6 +114,7 @@ export const map_exists = <T, R>(t: T | undefined, f: (t: T) => R): R | undefine
 export type UnionToIntersection<U> = (U extends any ? (x: U) => void : never) extends ((x: infer I) => void) ? I : never
 export type NumericKeys<T extends readonly unknown[]> = Exclude<keyof T, keyof any[]>;
 export type ArrayToUnion<A extends unknown[]> = A[NumericKeys<A>]
+export type RecordToUnion<A extends Record<string, unknown>> = A[keyof A]
 
 export type Identity<T> = T extends object ? {} & {
   [P in keyof T]: T[P]

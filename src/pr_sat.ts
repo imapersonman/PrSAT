@@ -734,6 +734,7 @@ const translate_constraints_to_smtlib = (constraints: Constraint[], regular: boo
   const [variables, tt, translated] = translate(constraints)
   const all_constraints: Constraint[] = []
   const smtlib_lines: S[] = []
+  smtlib_lines.push(['set-logic', 'QF_NRA'])
 
   // smtlib_lines.push(
   //   ['declare-fun', 'div', ['Real', 'Real'], 'Real'],

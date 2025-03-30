@@ -181,9 +181,8 @@ const real_expr_to_html = (expr: RealExpr): MathMLElement => {
     return math_el('mrow', {}, lead, lp, s2h(expr.arg), mid, s2h(expr.given), rp)
   } else if (expr.tag === 'state_variable_sum') {
     const e = math_el('mrow', {})
-    const s = (index: number) => math_el('msub', {}, math_el('mi', {}, 's'), math_el('mi', {}, index.toString()))
     for (const [index, si] of expr.indices.entries()) {
-      const summand = s(si)
+      const summand = state_id(si)
       e.appendChild(summand)
       if (index < expr.indices.length - 1) {
         const op = math_el('mo', {}, '+')
@@ -550,6 +549,15 @@ const model_to_assignments = async <CtxKey extends string>(ctx: Context<CtxKey>,
 }
 
 const model_assignment_display = (ma: ModelAssignmentOutput): Node => {
+  const wrap = (ma: ModelAssignmentOutput): Node => {
+    if (ma.tag === 'negative') {
+      const lp = math_el('mo', {}, '(')
+      const rp = math_el('mo', {}, ')')
+      return math_el('mrow', {}, lp, sub(ma), rp)
+    } else {
+      return sub(ma)
+    }
+  }
   const sub = (ma: ModelAssignmentOutput): Node => {
     if (ma.tag === 'literal') {
       return math_el('mi', {}, ma.value.toString())
@@ -558,17 +566,17 @@ const model_assignment_display = (ma: ModelAssignmentOutput): Node => {
     } else if (ma.tag === 'rational') {
       return math_el('mfrac', {}, sub(ma.numerator), sub(ma.denominator))
     } else if (ma.tag === 'root-obj') {
-      const b_2 = math_el('msup', {}, sub(ma.b), math_el('mi', {}, '2'))
+      const b_2 = math_el('msup', {}, wrap(ma.b), math_el('mi', {}, '2'))
       const _4ac = math_el('mrow', {},
         math_el('mi', {}, '4'),
-        math_el('mo', {}, '*'), sub(ma.a),
-        math_el('mo', {}, '*'), sub(ma.c))
-      const det = math_el('mrow', {}, b_2, _4ac)
+        math_el('mo', {}, '*'), wrap(ma.a),
+        math_el('mo', {}, '*'), wrap(ma.c))
+      const det = math_el('mrow', {}, b_2, math_el('mo', {}, '-'), _4ac)
       const sqrt_det = math_el('msqrt', {}, det)
       assert(ma.index === 1 || ma.index === 2)
       const pm = math_el('mo', {}, ma.index === 1 ? '-' : '+')
       const num = math_el('mrow', {}, sub(ma.b), pm, sqrt_det)
-      const den = math_el('mrow', {}, '2', math_el('mo', {}, '*'), sub(ma.a))
+      const den = math_el('mrow', {}, math_el('mi', {}, '2'), math_el('mo', {}, '*'), wrap(ma.a))
       return math_el('mfrac', {}, num, den)
     } else if (ma.tag === 'unknown') {
       return el('span', {}, s_to_string(ma.s))
@@ -580,11 +588,12 @@ const model_assignment_display = (ma: ModelAssignmentOutput): Node => {
   return math_el('math', {}, sub(ma))
 }
 
+const state_id = (index: number | string): MathMLElement =>
+  math_el('msub', {}, math_el('mi', {}, 'a'), math_el('mi', {}, index.toString()))
+
 const model_display = async <CtxKey extends string>(ctx: Context<CtxKey>, model: [TruthTable, Model<CtxKey>]): Promise<HTMLElement> => {
   const [tt, z3_model] = model
   const model_assignments = await model_to_assignments(ctx, z3_model)
-  const state_id = (index: number | string): MathMLElement =>
-    math_el('msub', {}, math_el('mi', {}, 's'), math_el('mi', {}, index.toString()))
   const body = el('tbody', {})
   const head = el('thead', {},
     el('tr', {},

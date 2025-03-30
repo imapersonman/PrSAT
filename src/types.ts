@@ -1,4 +1,5 @@
-import { setup_mutual_map } from "./tag_map"
+import { setup_mutual_map, TagMap, ReverseMapLookup, UnionToTagMap } from "./tag_map"
+import { Identity, RecordToUnion } from "./utils"
 
 type Sentence =
   | { tag: 'value', value: boolean }
@@ -8,6 +9,35 @@ type Sentence =
   | { tag: 'conjunction', left: Sentence, right: Sentence }
   | { tag: 'conditional', left: Sentence, right: Sentence }
   | { tag: 'biconditional', left: Sentence, right: Sentence }
+
+/*
+C ::= | R1 = R2
+      | R1 != R2
+      | R1 < R2
+      | R1 > R2
+      | R1 <= R2
+      | R1 >= R2
+      | C1 & C2 & ... & Cn
+      | C1 \/ C2 \/ ... \/ Cn
+      | C1 -> C2 -> ... -> Cn
+      | C1 <-> C2 <-> ... <-> Cn
+R ::= | <float>
+      | Pr(S)
+      | Pr(S1 | S2)
+      | -R
+      | R1 + R2
+      | R1 - R2
+      | R1 * R2
+      | R1 / R2
+      | R1 ^ R2
+S ::= | true | false
+      | <a letter A-Z>
+      | -S
+      | S1 & S2 & ... & Sn
+      | S1 \/ S2 ... \/ Sn
+      | S1 -> S2 ... -> Sn
+      | S1 <-> S2 ... <-> Sn
+*/
 
 type RealExpr =
   | { tag: 'literal', value: number }
@@ -40,6 +70,40 @@ export type PrSat = {
   RealExpr: RealExpr
   Constraint: Constraint
 }
+
+type ModifyTagMapEntry<
+  TK extends string,
+  TM extends TagMap<TK>,
+  NM extends Partial<{ [K in keyof TM]: { [IK in keyof TM[K]]: unknown } }>,
+  T
+> = ReverseMapLookup<TM, T> extends keyof TM & keyof NM
+  ? NM[ReverseMapLookup<TM, T>]
+  : T
+
+type UTM<TK extends string, TM extends Record<string, { [TKK in TK]: string } & Record<string, unknown>>, NM extends Partial<{ [K in keyof TM]: { [IK in keyof TM[K]]: unknown } }>, TME extends Record<string, unknown>> = {
+  [RK in keyof TME]: {
+    [SRK in keyof TME[RK]]: ModifyTagMapEntry<TK, TM, NM, TME[RK][SRK]>
+  }
+}[keyof TME]
+
+type ModifyTagMap<
+  TK extends string,
+  TM extends Record<string, { [TKK in TK]: string } & Record<string, unknown>>,
+  NM extends Partial<{ [K in keyof TM]: { [IK in keyof TM[K]]: unknown } }>
+> = {
+  [K in keyof TM]: TM[K] extends Record<string, unknown>
+    // ? { [RK in keyof UnionToTagMap<TK, TM[TK]>]: RK extends TK ? 'ack' : ModifyTagMapEntry<TK, TM, NM, TM[K][RK]> }
+    // ? { [RK in keyof UnionToTagMap<TK, TM[TK]>]: TM[K] }
+    ? UTM<TK, TM, NM, UnionToTagMap<TK, TM[K]>>
+    : TM[K]
+}
+
+type cool = ModifyTagMap<
+  'tag',
+  PrSat,
+  { Sentence: { tag: 'what' } }
+>
+type beans = cool['RealExpr']
 
 export const PrSatFuncs = setup_mutual_map<PrSat>()({
   Sentence: {
