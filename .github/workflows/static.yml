@@ -31,6 +31,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Install Packages
+        run: |
+          npm install
       - name: Run Unit Tests
         run: |
           npm run test
@@ -38,7 +41,6 @@ jobs:
         uses: actions/configure-pages@v5
       - name: Build
         run: |
-          npm install
           npm run build
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
