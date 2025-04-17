@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { sentence_builder, real_expr_builder, constraint_builder, SentenceFuzzer, random_letters_and_assignments, sentence_to_random_string, RealExprFuzzer, real_expr_to_string, ConstraintFuzzer, constraint_to_random_string } from './pr_sat'
+import { sentence_builder, real_expr_builder, constraint_builder, sentence_to_random_string, real_expr_to_string, constraint_to_random_string } from './pr_sat'
 import { assert_parse_constraint, assert_parse_real_expr, assert_parse_sentence } from './parser'
 import { Random } from './random'
 import { PrSat, PrSatFuncs } from './types'
