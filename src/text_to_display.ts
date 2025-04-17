@@ -571,7 +571,7 @@ const model_assignment_display = (ma: ModelAssignmentOutput): Node => {
         math_el('mi', {}, '4'),
         math_el('mo', {}, '*'), wrap(ma.a),
         math_el('mo', {}, '*'), wrap(ma.c))
-      const det = math_el('mrow', {}, b_2, math_el('mo', {}, '-'), _4ac)
+      const det = math_el('mrow', {}, math_el('mrow', {}, math_el('mo', {}, '-'), b_2), math_el('mo', {}, '-'), _4ac)
       const sqrt_det = math_el('msqrt', {}, det)
       assert(ma.index === 1 || ma.index === 2)
       const pm = math_el('mo', {}, ma.index === 1 ? '-' : '+')
@@ -616,10 +616,19 @@ const model_display = async <CtxKey extends string>(ctx: Context<CtxKey>, model:
   return e
 }
 
-const main = <CtxKey extends string>(ctx: Context<CtxKey>): HTMLElement => {
+type Z3ContextState =
+  | { tag: 'loading' }
+  | { tag: 'ready', ctx: Context }
+  | { tag: 'error', message: string }
+
+const main = (): HTMLElement => {
   const mi = multi_input()
   const is_regular = new Editable(false)
+  const z3_state = new Editable<Z3ContextState>({ tag: 'loading' })
   const generate_button = el('input', { type: 'button', value: 'Generate', class: 'generate' }) as HTMLButtonElement
+  const options_button = el('input', { type: 'button', value: '⚙', class: 'options' }) as HTMLButtonElement
+  const z3_status_container = el('div', { style: 'margin-left: 0.4em;' })
+  const generate_line = el('div', { style: 'display: flex;' }, generate_button, options_button, z3_status_container)
   const regular_toggle = el('input', { type: 'checkbox' }, 'Regular') as HTMLInputElement
   const model_container = el('div', { class: 'model-container' })
 
@@ -635,38 +644,73 @@ const main = <CtxKey extends string>(ctx: Context<CtxKey>): HTMLElement => {
     is_regular.set(regular_toggle.checked)
   })
 
-  generate_button.addEventListener('click', async () => {
-    console.log('clicked generate!')
-    const constraints = assert_exists(mi.all_constraints.get(), 'Generate button clicked but not all constraints ready!')
-    console.log('constraints:', constraints.map(constraint_to_string))
+  const load_z3 = async (): Promise<Context> => {
+    const { Context } = await init_z3()
+    return Context('main')
+  }
 
-    model_container.innerHTML = ''
-    try {
-      const { status, all_constraints, tt, model } = await pr_sat(ctx, constraints, is_regular.get())
-      if (status === 'sat') {
-        console.log('sat!')
-        const model_html = await model_display(ctx, [tt, model])
-        model_container.appendChild(model_html)
-      } else {
-        console.log(status)
-        model_container.append(status)
+  load_z3()
+    .then((ctx) => {
+      z3_state.set({ tag: 'ready', ctx })
+    })
+    .catch((error) => {
+      z3_state.set({ tag: 'error', message: error.message })
+    })
+  
+  z3_state.watch((state) => {
+    z3_status_container.innerHTML = ''
+    if (state.tag === 'loading') {
+      z3_status_container.append('Loading Z3...')
+      generate_button.disabled = true
+    } else if (state.tag === 'ready') {
+      z3_is_ready(state.ctx)
+      generate_button.disabled = false
+    } else if (state.tag === 'error') {
+      z3_status_container.append(state.message)
+      z3_status_container.style.color = 'red'
+      if (state.message === 'Out of memory') {
+        z3_status_container.append('.  Try closing and re-opening the tab or window.')
       }
-
-      for (const constraint of all_constraints) {
-        const e = constraint_to_html(constraint)
-        model_container.appendChild(el('div', { style: 'margin-top: 0.4em;' }, e))
-      }
-
-    } catch (e: any) {
-      model_container.appendChild(el('div', { style: 'color: red;' },
-        el('div', {}, 'Exception!'),
-        e.message))
+      generate_button.disabled = true
+    } else {
+      throw new Error('')
     }
-  })
+  }).call()
+
+  const z3_is_ready = (ctx: Context) => {
+    generate_button.addEventListener('click', async () => {
+      console.log('clicked generate!')
+      const constraints = assert_exists(mi.all_constraints.get(), 'Generate button clicked but not all constraints ready!')
+      console.log('constraints:', constraints.map(constraint_to_string))
+
+      model_container.innerHTML = ''
+      try {
+        const { status, all_constraints, tt, model } = await pr_sat(ctx, constraints, is_regular.get())
+        if (status === 'sat') {
+          console.log('sat!')
+          const model_html = await model_display(ctx, [tt, model])
+          model_container.appendChild(model_html)
+        } else {
+          console.log(status)
+          model_container.append(status)
+        }
+
+        for (const constraint of all_constraints) {
+          const e = constraint_to_html(constraint)
+          model_container.appendChild(el('div', { style: 'margin-top: 0.4em;' }, e))
+        }
+
+      } catch (e: any) {
+        model_container.appendChild(el('div', { style: 'color: red;' },
+          el('div', {}, 'Exception!'),
+          e.message))
+      }
+    })
+  }
 
   return el('div', {},
     mi.element,
-    generate_button,
+    generate_line,
     regular_toggle,
     model_container,
   )
@@ -677,31 +721,32 @@ if (!hasMathMLSupport()) {
   throw new Error('No mathML support :(')
 }
 
-(async () => {
-  root.append('loading...')
-  const { Context } = await init_z3()
-  root.innerHTML = ''
-  const ctx = Context('main')
-  root.appendChild(main(ctx))
-})()
-.then(() => {
-  console.log('loaded z3!')
-})
-.catch((error) => {
-  root.innerHTML = ''
-  const error_el = el('div', { style: 'color: red; display: block;' },
-    el('div', {}, 'There was an error loading z3.'),
-    el('div', {}, 'Try closing out of this tab and opening it back up again.'),
-  )
-  if (error instanceof RangeError) {
-    console.log('yes it is a RangeError')
-    if (error.message === 'Out of memory') {
-      error_el.appendChild(el('div', {}, '(This error happens when you reload the page too frequently)'))
-    }
-  }
-  root.append(error_el)
-})
-.finally(() => {
-  console.log('we done anyway')
-})
+root.appendChild(main())
 
+// (async () => {
+//   root.append('loading...')
+//   const { Context } = await init_z3()
+//   root.innerHTML = ''
+//   const ctx = Context('main')
+//   root.appendChild(main(ctx))
+// })()
+// .then(() => {
+//   console.log('loaded z3!')
+// })
+// .catch((error) => {
+//   root.innerHTML = ''
+//   const error_el = el('div', { style: 'color: red; display: block;' },
+//     el('div', {}, 'There was an error loading z3.'),
+//     el('div', {}, 'Try closing out of this tab and opening it back up again.'),
+//   )
+//   if (error instanceof RangeError) {
+//     console.log('yes it is a RangeError')
+//     if (error.message === 'Out of memory') {
+//       error_el.appendChild(el('div', {}, '(This error happens when you reload the page too frequently)'))
+//     }
+//   }
+//   root.append(error_el)
+// })
+// .finally(() => {
+//   console.log('we done anyway')
+// })

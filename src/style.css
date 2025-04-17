@@ -58,12 +58,17 @@
 
 .single-input input[type=button].info.error {
   color: red;
-  /* font-style: italic; */
 }
 
 input[type=button].generate {
   background-color: gainsboro;
   border-radius: 0.4em;
+}
+
+input[type=button].options {
+  background-color: gainsboro;
+  border-radius: 0.4em;
+  margin-left: 0.4em;
 }
 
 .model-container table {
