@@ -16,7 +16,8 @@ import {
   // MutualMapSnap, MutualMapSpec, MutualTagMap, ReverseMapLookup, TagMap, TagMapEntryToSpec,
   TagMapToMutualMap,
   // TagMapToSpecGrammar, TagUnion, UnionToTagMap, 
-  grammar_to_loaders, grammar_to_fuzzers
+  grammar_to_loaders, grammar_to_fuzzers,
+  full_from_partial_string_params
 } from './tag_map'
 import { PrSat } from './types'
 
@@ -734,4 +735,17 @@ describe('constraint_fuzzers', () => {
       }
     })
   }
+})
+
+describe.only('full_from_partial_string_params', () => {
+  test('', () => {
+    const partial = {
+      bounds: {
+        lower: 1,
+        upper: 1,
+      },
+      characters: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+    }
+    expect(full_from_partial_string_params(partial)).toEqual(partial)
+  })
 })

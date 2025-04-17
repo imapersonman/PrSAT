@@ -2,7 +2,8 @@ import { describe, expect, test } from 'vitest'
 import { sentence_builder, real_expr_builder, constraint_builder, SentenceFuzzer, random_letters_and_assignments, sentence_to_random_string, RealExprFuzzer, real_expr_to_string, ConstraintFuzzer, constraint_to_random_string } from './pr_sat'
 import { assert_parse_constraint, assert_parse_real_expr, assert_parse_sentence } from './parser'
 import { Random } from './random'
-import { PrSat } from './types'
+import { PrSat, PrSatFuncs } from './types'
+import { FuzzerOptions } from './tag_map'
 
 type Sentence = PrSat['Sentence']
 type RealExpr = PrSat['RealExpr']
@@ -14,6 +15,10 @@ const { eq, neq, lt, lte, gt, gte, cnot, cand, cor, cimp, ciff } = constraint_bu
 
 const [A, B, C] = [letter('A'), letter('B'), letter('C')]
 const [D, E, F] = [letter('D'), letter('E'), letter('F')]
+
+const shared_random = new Random('something')
+const fuzz_options: FuzzerOptions<any, any> = { target_depth: 6, exclude: { RealExpr: ['state_variable_sum'] } }
+const fuzzers = PrSatFuncs.first_order().fuzzers(shared_random)
 
 describe('parse', () => {
   describe('Sentence', () => {
@@ -76,6 +81,7 @@ describe('parse', () => {
     test_parse('Pr(A & B | B → C)', cpr(and(A, B), imp(B, C)))
     test_parse('(OSB - -62076.49847564241) * 18062.68360562343', multiply(minus(vbl('OSB'), neg(lit(62076.49847564241))), lit(18062.68360562343)))
     test_parse('-21.592482924461365^2', neg(power(lit(21.592482924461365), lit(2))))
+    test_parse('2^(-3)', power(lit(2), neg(lit(3))))
   })
   describe('Constraint', () => {
     const parse = assert_parse_constraint
@@ -100,19 +106,22 @@ describe('parse', () => {
     test_right_assoc('↔', ciff)
   })
 
-  const random = new Random()
+  // const random = new Random()
+  const random = shared_random
   describe(`fuzzed (seed = ${random.seed_string})`, () => {
-    const max_depth = 3
-    const n_letters = 5
-    const n_examples = 10
-    const sentence_fuzzer = new SentenceFuzzer(new Random(), max_depth)
-    const [letters] = random_letters_and_assignments(sentence_fuzzer.random, n_letters)
+    // const n_letters = 5
+    const n_examples = 5
+    // const sentence_fuzzer = new SentenceFuzzer(new Random(), max_depth)
+    // const [letters] = random_letters_and_assignments(random, n_letters)
+
 
     describe('Sentence', () => {
       const parse = assert_parse_sentence
       const examples: Sentence[] = []
       for (let example_index = 0; example_index < n_examples; example_index++) {
-        const ex = sentence_fuzzer.generate(letters)
+        // const ex = sentence_fuzzer.generate(letters)
+        const ex = fuzzers.Sentence.of_type(fuzz_options)
+        fuzzers
         examples.push(ex)
       }
 
@@ -122,12 +131,13 @@ describe('parse', () => {
       }
     })
 
-    const real_expr_fuzzer = new RealExprFuzzer(random, sentence_fuzzer, max_depth, undefined, ['state_variable_sum'])
+    // const real_expr_fuzzer = new RealExprFuzzer(random, sentence_fuzzer, max_depth, undefined, ['state_variable_sum'])
     describe('RealExpr', () => {
       const parse = assert_parse_real_expr
       const examples: RealExpr[] = []
       for (let example_index = 0; example_index < n_examples; example_index++) {
-        const ex = real_expr_fuzzer.generate(letters)
+        // const ex = real_expr_fuzzer.generate(letters)
+        const ex = fuzzers.RealExpr.of_type(fuzz_options)
         examples.push(ex)
       }
 
@@ -137,12 +147,12 @@ describe('parse', () => {
       }
     })
 
-    const constraint_fuzzer = new ConstraintFuzzer(random, sentence_fuzzer, real_expr_fuzzer, max_depth)
+    // const constraint_fuzzer = new ConstraintFuzzer(random, sentence_fuzzer, real_expr_fuzzer, max_depth)
     describe('Constraint', () => {
       const parse = assert_parse_constraint
       const examples: Constraint[] = []
       for (let example_index = 0; example_index < n_examples; example_index++) {
-        const ex = constraint_fuzzer.generate(letters)
+        const ex = fuzzers.Constraint.of_type(fuzz_options)
         examples.push(ex)
       }
 

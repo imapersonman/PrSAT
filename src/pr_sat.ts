@@ -569,7 +569,8 @@ const real_expr_to_gen_string = (expr: RealExpr, s2s: (s: Sentence) => string): 
   } else if (expr.tag === 'given_probability') {
     return `Pr(${s2s(expr.arg)} | ${s2s(expr.given)})`
   } else if (expr.tag === 'power') {
-    return `${expr.base.tag === 'negative' ? `(${real_expr_to_string(expr.base)})` : wrap(expr.base)}^${wrap(expr.exponent)}`
+    const mod_wrap_neg = (e: RealExpr): string => e.tag === 'negative' ? `(${real_expr_to_string(e)})` : wrap(e)
+    return `${mod_wrap_neg(expr.base)}^${mod_wrap_neg(expr.exponent)}`
   } else if (expr.tag === 'negative') {
     // Gross but it works.
     return `-${wrap(expr.expr)}`

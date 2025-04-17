@@ -9,35 +9,6 @@ type Sentence =
   | { tag: 'conditional', left: Sentence, right: Sentence }
   | { tag: 'biconditional', left: Sentence, right: Sentence }
 
-/*
-C ::= | R1 = R2
-      | R1 != R2
-      | R1 < R2
-      | R1 > R2
-      | R1 <= R2
-      | R1 >= R2
-      | C1 & C2 & ... & Cn
-      | C1 \/ C2 \/ ... \/ Cn
-      | C1 -> C2 -> ... -> Cn
-      | C1 <-> C2 <-> ... <-> Cn
-R ::= | <float>
-      | Pr(S)
-      | Pr(S1 | S2)
-      | -R
-      | R1 + R2
-      | R1 - R2
-      | R1 * R2
-      | R1 / R2
-      | R1 ^ R2
-S ::= | true | false
-      | <a letter A-Z>
-      | -S
-      | S1 & S2 & ... & Sn
-      | S1 \/ S2 ... \/ Sn
-      | S1 -> S2 ... -> Sn
-      | S1 <-> S2 ... <-> Sn
-*/
-
 type RealExpr =
   | { tag: 'literal', value: number }
   | { tag: 'variable', id: string }
@@ -139,7 +110,11 @@ export const PrSatFuncs = setup_mutual_map<PrSat>()({
         value: {
           tag: "primitive",
           type: "number",
-          constraints: undefined
+          constraints: {
+            bounds: {
+              lower: 0,
+            }
+          }
         }
       }
     },
@@ -170,7 +145,8 @@ export const PrSatFuncs = setup_mutual_map<PrSat>()({
             constraints: {
               bounds: {
                 lower: 0
-              }
+              },
+              is_integer: true,
             }
           },
           max_length: undefined

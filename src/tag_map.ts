@@ -134,8 +134,8 @@ export type MutualTagMap<TagKey extends string> = {
 export type MutualMapSpec =
   | string
   | { tag: 'primitive', type: 'boolean' }
-  | { tag: 'primitive', type: 'number', constraint?: { is_integer?: boolean, bounds?: Partial<Bounds> } }
-  | { tag: 'primitive', type: 'string', constraint?: { bounds?: Partial<Bounds>, characters?: string } }
+  | { tag: 'primitive', type: 'number', constraints?: { is_integer?: boolean, bounds?: Partial<Bounds> } }
+  | { tag: 'primitive', type: 'string', constraints?: { bounds?: Partial<Bounds>, characters?: string } }
   | { tag: 'constant', value: unknown }
   | { tag: 'list', spec: MutualMapSpec, max_length?: number }
   | { tag: 'record', record: Record<string, MutualMapSpec> }
@@ -255,10 +255,10 @@ export const grammar_to_recursors = <TK extends string, MM extends MutualMap<TK>
   return top_recursors
 }
 
-type FuzzerOptions<TagKey extends string, MTM extends MutualTagMap<TagKey>> = {
+export type FuzzerOptions<TagKey extends string, MTM extends MutualTagMap<TagKey>> = {
   target_depth?: number
-  include?: { [TK in keyof MTM]: (keyof MTM[TK] & string)[] }
-  exclude?: { [TK in keyof MTM]: (keyof MTM[TK] & string)[] }
+  include?: { [TK in keyof MTM]?: (keyof MTM[TK] & string)[] }
+  exclude?: { [TK in keyof MTM]?: (keyof MTM[TK] & string)[] }
 }
 
 type MutualMapFuzzers<TagKey extends string, MM extends MutualMap<TagKey>> = {
@@ -338,14 +338,14 @@ export const grammar_to_fuzzers = <TK extends string, MM extends MutualMap<TK>>(
       if (spec.type === 'boolean') {
         return random.boolean()
       } else if (spec.type === 'number') {
-        const bounds: Bounds = full_from_partial_bounds(spec.constraint?.bounds)
-        if (spec.constraint?.is_integer ?? false) {
+        const bounds: Bounds = full_from_partial_bounds(spec.constraints?.bounds)
+        if (spec.constraints?.is_integer ?? false) {
           return random.integer(bounds)
         } else {
-          return random.float()
+          return random.float(bounds)
         }
       } else if (spec.type === 'string') {
-        return random.string(full_from_partial_string_params(spec.constraint))
+        return random.string(full_from_partial_string_params(spec.constraints))
       } else {
         throw new Error('random_prim fallthrough')
       }
@@ -596,10 +596,10 @@ const check_primitive = (spec: UnionToTagMap<'tag', Exclude<MutualMapSpec, strin
   } else if (spec.type === 'number') {
     if (typeof p.value !== 'number') {
       return `Expected number, got ${typeof p.value}!`
-    } else if (spec.constraint?.is_integer && !Number.isInteger(p.value)) {
+    } else if (spec.constraints?.is_integer && !Number.isInteger(p.value)) {
       return `Expected integer, got a non-integer value '${p.value}'!`
-    } else if (spec.constraint?.bounds !== undefined) {
-      const { lower, upper } = spec.constraint.bounds
+    } else if (spec.constraints?.bounds !== undefined) {
+      const { lower, upper } = spec.constraints.bounds
       if (lower !== undefined && p.value < lower) {
         return `Expected integer in range [${lower}, ${upper}], got integer '${p.value}' breaking the lower bound!`
       } else if (upper !== undefined && p.value > upper) {
@@ -732,7 +732,7 @@ const full_from_partial_bounds = (bounds: Partial<Bounds> | undefined, defaults?
   }
 }
 
-const full_from_partial_string_params = (params: { bounds?: { lower?: number, upper?: number }, characters?: string } | undefined): StringParams => {
+export const full_from_partial_string_params = (params: { bounds?: { lower?: number, upper?: number }, characters?: string } | undefined): StringParams => {
   const BOUNDS_DEFAULTS = { diff: 0, lower: 10 }
   const DEFAULT_LENGTH_BOUNDS: Bounds = { lower: BOUNDS_DEFAULTS.lower, upper: BOUNDS_DEFAULTS.lower + BOUNDS_DEFAULTS.diff }
   const DEFAULT_CHARACTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
@@ -746,7 +746,7 @@ const full_from_partial_string_params = (params: { bounds?: { lower?: number, up
   } else if (params.bounds !== undefined && params.characters === undefined) {
     return { bounds: full_from_partial_bounds(params.bounds, BOUNDS_DEFAULTS), characters: DEFAULT_CHARACTERS }
   } else if (params.bounds !== undefined && params.characters !== undefined) {
-    return { bounds: full_from_partial_bounds(params.bounds, BOUNDS_DEFAULTS), characters: DEFAULT_CHARACTERS }
+    return { bounds: full_from_partial_bounds(params.bounds, BOUNDS_DEFAULTS), characters: params.characters }
   } else {
     return { bounds: DEFAULT_LENGTH_BOUNDS, characters: DEFAULT_CHARACTERS }
   }
