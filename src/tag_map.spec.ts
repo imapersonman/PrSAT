@@ -559,7 +559,7 @@ describe('constraint_recursors', () => {
       })
       describe('immutable acc', () => {
         test('A', () => expect(letters_in_2({ tag: 'letter', id: 'A' })).toEqual(['A']))
-        test('~B', () => expect(letters_in_2({ tag: 'negation', sentence: { tag: 'letter', id: 'B', index: 0 } })).toEqual(['B']))
+        test('~B', () => expect(letters_in_2({ tag: 'negation', sentence: { tag: 'letter', id: 'B' } })).toEqual(['B']))
         test('A & B', () => expect(letters_in_2({ tag: 'conjunction', left: { tag: 'letter', id: 'A', index: 0 }, right: { tag: 'letter', id: 'B', index: 0 } })).toEqual(['A', 'B']))
       })
     })
