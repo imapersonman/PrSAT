@@ -592,10 +592,15 @@ const model_assignment_display = (ma: ModelAssignmentOutput): Node => {
   return math_el('math', {}, sub(ma))
 }
 
-const state_id = (index: number | string): MathMLElement =>
-  math_el('msub', {}, math_el('mi', {}, 'a'), math_el('mi', {}, index.toString()))
+const state_id = (index: number | string): MathMLElement => {
+  const i = typeof index === 'number' ? index + 1 : index
+  return math_el('msub', {}, math_el('mi', {}, 'a'), math_el('mi', {}, i.toString()))
+}
 
 const model_display = async <CtxKey extends string>(ctx: Context<CtxKey>, model: [TruthTable, Model<CtxKey>]): Promise<HTMLElement> => {
+  // One column per sentence-letter
+  // Header has the form "A1 | A2 | ... | An | "
+
   const [tt, z3_model] = model
   const model_assignments = await model_to_assignments(ctx, z3_model)
   const body = el('tbody', {})
