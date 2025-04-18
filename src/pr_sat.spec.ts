@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest"
 import { Random } from "./random"
 import { assert, assert_exists } from "./utils"
 import { a2eid, constraint_builder, evaluate_sentence, parse_s, random_letters_and_assignments, real_expr_to_smtlib, recursively_evaluate_sentence, SentenceFuzzer, state_from_index, translate_constraint, translate_real_expr, TruthTable } from "./pr_sat"
-import { PrSat, PrSatFuncs as PrSatUtils } from "./types"
+import { PrSat, PrSatFuncs as PrSatUtils, SentenceMap } from "./types"
 
 type Sentence = PrSat['Sentence']
 type RealExpr = PrSat['RealExpr']
@@ -26,7 +26,11 @@ const { eq } = constraint_builder
 
 describe('TruthTable', () => {
   test('iterator', () => {
-    const tt = new TruthTable(['A', 'B', 'C'])
+    const tt = new TruthTable([letter({ id: 'A', index: 0 }), letter({ id: 'B', index: 0 }), letter({ id: 'C', index: 0 })])
+    expect([...tt.state_indices()]).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+  })
+  test('n states', () => {
+    const tt = new TruthTable([letter({ id: 'A', index: 1 }), letter({ id: 'B', index: 2 }), letter({ id: 'C', index: 3 })])
     expect([...tt.state_indices()]).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
   })
   test('no letters', () => {
@@ -80,8 +84,8 @@ describe('TruthTable', () => {
 
 describe('translate', () => {
   describe('3 sentence-letters', () => {
-    const tt = new TruthTable(['A', 'B', 'C'])
     const [A, B, C] = [letter({ id: 'A', index: 0 }), letter({ id: 'B', index: 0 }), letter({ id: 'C', index: 0 })]
+    const tt = new TruthTable([A, B, C])
     test('Pr(A)', () => {
       const actual = translate_real_expr(tt, pr({ arg: A }))
       const expected = svs({ indices: [0, 1, 2, 3] })
@@ -238,20 +242,20 @@ describe('evaluate_sentence', () => {
     const n_example_sentences = 20
     const max_letters = 26
     const fuzzer = new SentenceFuzzer(new Random(), 20)
-    const examples: { sentence: Sentence, letters: string[], eval_id: (id: string) => boolean }[] = []
+    const examples: { sentence: Sentence, letters: SentenceMap['letter'][], eval_letter: (id: SentenceMap['letter']) => boolean }[] = []
 
     for (let example_index = 0; example_index < n_example_sentences; example_index++) {
       const n = fuzzer.random.integer({ lower: 1, upper: max_letters })
-      const [letters, eval_id] = random_letters_and_assignments(fuzzer.random, n)
+      const [letters, eval_letter] = random_letters_and_assignments(fuzzer.random, n)
       const sentence = fuzzer.generate(letters)
-      examples.push({ sentence, letters, eval_id })
+      examples.push({ sentence, letters, eval_letter })
     }
 
     const rec_results: boolean[] = []
     const results: boolean[] = []
 
     // const rec_start = performance.now()
-    for (const { sentence, eval_id } of examples) {
+    for (const { sentence, eval_letter: eval_id } of examples) {
       const value = recursively_evaluate_sentence(eval_id, sentence)
       rec_results.push(value)
     }
@@ -259,7 +263,7 @@ describe('evaluate_sentence', () => {
     // const rec_time_millis = rec_end - rec_start
 
     // const normal_start = performance.now()
-    for (const { sentence, eval_id} of examples) {
+    for (const { sentence, eval_letter: eval_id} of examples) {
       const value = evaluate_sentence(eval_id, sentence)
       results.push(value)
     }
@@ -312,7 +316,7 @@ describe('translate', () => {
   const { power } = PrSatUtils.inits.RealExpr
   const A = letter({ id: 'A', index: 0 })
   test('translate doesn\'t throw with power', () => {
-    translate_real_expr(new TruthTable(['A']), power({ base: pr({ arg: A }), exponent: lit({ value: 2 }) }))
+    translate_real_expr(new TruthTable([A]), power({ base: pr({ arg: A }), exponent: lit({ value: 2 }) }))
   })
 })
 
@@ -331,28 +335,29 @@ describe('translate', () => {
 describe('state dnf stuff', () => {
   const n_example_sentences = 10
   const max_letters = 12
+  // Using the old-school but worse sentence fuzzer so I can control letters.
   const fuzzer = new SentenceFuzzer(new Random())
-  const examples: { sentence: Sentence, tt: TruthTable, letters: string[], eval_id: (id: string) => boolean }[] = []
+  const examples: { sentence: Sentence, tt: TruthTable, letters: SentenceMap['letter'][], eval_letter: (id: SentenceMap['letter']) => boolean }[] = []
 
   for (let example_index = 0; example_index < n_example_sentences; example_index++) {
     const n = fuzzer.random.integer({ lower: 1, upper: max_letters })
-    const [letters, eval_id] = random_letters_and_assignments(fuzzer.random, n)
+    const [letters, eval_letter] = random_letters_and_assignments(fuzzer.random, n)
     // const [letters, eval_id] = random_letters_and_assignments(fuzzer.random, max_letters)
     const tt = new TruthTable(letters)
     const sentence = fuzzer.generate(letters)
-    examples.push({ sentence, tt, letters, eval_id })
+    examples.push({ sentence, tt, letters, eval_letter })
   }
 
-  for (const [index, { sentence, tt, letters, eval_id }] of examples.entries()) {
+  for (const [index, { sentence, tt, letters, eval_letter }] of examples.entries()) {
     test(`seed: ${fuzzer.random.seed_string}, index: ${index}, n_letters: ${letters.length}`, () => {
       // for a fixed assignment:
       // eval(sentence) === eval(state_dnf_to_sentence(compute_state_dnf(sentence)))
-      const direct_value = recursively_evaluate_sentence(eval_id, sentence)
+      const direct_value = recursively_evaluate_sentence(eval_letter, sentence)
       const dnf = tt.compute_dnf(sentence)
       const dnf_sentence = state_dnf_to_sentence(tt, dnf)
-      const dnf_value = evaluate_sentence(eval_id, dnf_sentence)
+      const dnf_value = evaluate_sentence(eval_letter, dnf_sentence)
       expect(direct_value).toEqual(dnf_value)
-      const direct_dnf_value = tt.evaluate_dnf(eval_id, dnf)
+      const direct_dnf_value = tt.evaluate_dnf(eval_letter, dnf)
       expect(direct_value).toEqual(direct_dnf_value)
     })
   }

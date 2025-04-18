@@ -229,7 +229,11 @@ const sentence_to_html = (s: Sentence): MathMLElement => {
     const text = s.value ? '⊤' : '⊥'
     return math_el('mi', {}, text)
   } else if (s.tag === 'letter') {
-    return math_el('mi', {}, s.id)
+    const me = math_el('mi', {}, s.id)
+    if (s.index > 0) {
+      me.append(s.index.toString())
+    }
+    return me
   } else if (s.tag === 'negation') {
     const op = math_el('mo', {}, '~')
     return math_el('mrow', {}, op, wrap(s.sentence, ['negation', 'letter', 'value']))
@@ -571,11 +575,11 @@ const model_assignment_display = (ma: ModelAssignmentOutput): Node => {
         math_el('mi', {}, '4'),
         math_el('mo', {}, '*'), wrap(ma.a),
         math_el('mo', {}, '*'), wrap(ma.c))
-      const det = math_el('mrow', {}, math_el('mrow', {}, math_el('mo', {}, '-'), b_2), math_el('mo', {}, '-'), _4ac)
+      const det = math_el('mrow', {}, b_2, math_el('mo', {}, '-'), _4ac)
       const sqrt_det = math_el('msqrt', {}, det)
       assert(ma.index === 1 || ma.index === 2)
       const pm = math_el('mo', {}, ma.index === 1 ? '-' : '+')
-      const num = math_el('mrow', {}, sub(ma.b), pm, sqrt_det)
+      const num = math_el('mrow', {}, math_el('mrow', {}, math_el('mo', {}, '-'), wrap(ma.b)), pm, sqrt_det)
       const den = math_el('mrow', {}, math_el('mi', {}, '2'), math_el('mo', {}, '*'), wrap(ma.a))
       return math_el('mfrac', {}, num, den)
     } else if (ma.tag === 'unknown') {

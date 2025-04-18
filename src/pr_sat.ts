@@ -7,7 +7,7 @@ type Constraint = PrSat['Constraint']
 
 export const sentence_builder = {
   val: (v: boolean): Sentence => ({ tag: 'value', value: v }),
-  letter: (id: string, index?: number): Sentence => ({ tag: 'letter', id, index: index ?? 0 }),
+  letter: (id: string, index?: number): SentenceMap['letter'] => ({ tag: 'letter', id, index: index ?? 0 }),
   not: (s: Sentence): Sentence => ({ tag: 'negation', sentence: s }),
   and: (left: Sentence, right: Sentence): Sentence => ({ tag: 'conjunction', left, right }),
   or: (left: Sentence, right: Sentence): Sentence => ({ tag: 'disjunction', left, right }),
@@ -54,32 +54,74 @@ const { gt, gte, eq, cnot } = constraint_builder
 // https://stackoverflow.com/questions/9939760/how-do-i-convert-an-integer-to-binary-in-javascript
 const to_bin_str = (n: number) => (n >>> 0).toString(2)
 
+const comp_letters = (a: SentenceMap['letter'], b: SentenceMap['letter']): number => {
+  const local_comp = a.id.localeCompare(b.id)
+  if (local_comp === 0) {
+    return a.index - b.index
+  } else {
+    return local_comp
+  }
+}
+
+class LetterSet {
+  private readonly underlying_map = new Map<string, Set<number>>()
+  private readonly all_letters: SentenceMap['letter'][] = []
+
+  constructor(letters: SentenceMap['letter'][] = []) {
+    for (const l of letters) {
+      this.add(l)
+    }
+  }
+
+  [Symbol.iterator]() { return this.all_letters[Symbol.iterator]() }
+
+  has(letter: SentenceMap['letter']): boolean {
+    const underlying_set = this.underlying_map.get(letter.id)
+    return underlying_set?.has(letter.index) ?? false
+  }
+
+  add(l: SentenceMap['letter']): boolean {
+    const underlying_set = this.underlying_map.get(l.id)
+    if (underlying_set === undefined) {
+      this.underlying_map.set(l.id, new Set([l.index]))
+      this.all_letters.push(l)
+      return true
+    } else if (!underlying_set.has(l.index)) {
+      underlying_set.add(l.index)
+      this.all_letters.push(l)
+      return true
+    } else {
+      return false
+    }
+  }
+}
+
 export class TruthTable {
-  private readonly letter_ids: string[]
+  private readonly letter_ids: SentenceMap['letter'][]
   // private readonly state_table: { assignment: Record<string, boolean>, state: Sentence }[]
   // indices correspond to states indices.
   // values are sets -- if a letter in letter_ids appears in a state_index's set, then the state
   // has that letter set to true.
-  private readonly state_table: Set<string>[]
+  private readonly state_table: LetterSet[]
 
-  constructor(letters: string[]) {
-    this.letter_ids = [...new Set(letters)].sort()
+  constructor(letters: SentenceMap['letter'][]) {
+    this.letter_ids = [...new LetterSet(letters)].sort(comp_letters)
     this.state_table = TruthTable.enumerate_states(this.letter_ids)
   }
 
-  private static enumerate_states(letter_ids: string[]): Set<string>[] {
+  private static enumerate_states(letter_ids: SentenceMap['letter'][]): LetterSet[] {
     const n_states = Math.pow(2, letter_ids.length)
-    const assignments: Set<string>[] = []
+    const assignments: LetterSet[] = []
 
     if (letter_ids.length === 0) {
-      assignments.push(new Set())
+      assignments.push(new LetterSet())
       return assignments
     }
 
     for (let state_index = 0; state_index < n_states; state_index++) {
       const bin_str = to_bin_str(state_index).padStart(letter_ids.length, '0')
       assert(bin_str.length === letter_ids.length, 'Binary string length different than number of letters in TruthTable!')
-      const state_set = new Set<string>()
+      const state_set = new LetterSet()
       for (let bi = 0; bi < bin_str.length; bi++) {
         const current_bit = assert_exists(bin_str[bin_str.length - bi - 1])
         const current_let = assert_exists(letter_ids[bin_str.length - bi - 1])
@@ -113,26 +155,26 @@ export class TruthTable {
     return dnf
   }
 
-  private evaluate_state(eval_id: (id: string) => boolean, state_index: number): boolean {
+  private evaluate_state(eval_letter: (id: SentenceMap['letter']) => boolean, state_index: number): boolean {
     assert(state_index >= 0)
     assert(state_index < this.state_table.length)
     const state_set = this.state_table[state_index]
     for (const id of this.letter_ids) {
       // If they don't agree on one, return false.
-      if (eval_id(id) !== state_set.has(id)) {
+      if (eval_letter(id) !== state_set.has(id)) {
         return false
       }
     }
     return true
   }
 
-  evaluate_dnf(eval_id: (id: string) => boolean, state_dnf: number[]): boolean {
+  evaluate_dnf(eval_letter: (id: SentenceMap['letter']) => boolean, state_dnf: number[]): boolean {
     for (const state_index of state_dnf) {
       assert(state_index >= 0, 'Evaluating state < 0!')
       assert(state_index < this.state_table.length, 'Evaluating state >= number of states!')
       // const { state } = this.state_table[state_index]
       // const value = recursively_evaluate_sentence(assignment, state)
-      const value = this.evaluate_state(eval_id, state_index)
+      const value = this.evaluate_state(eval_letter, state_index)
       if (value) {
         return true
       }
@@ -173,7 +215,7 @@ export class TruthTable {
       let current_sentence: Sentence | undefined = undefined
       for (let bi = 0; bi < bin_str.length; bi++) {
         const current_bit = assert_exists(bin_str[bin_str.length - bi - 1])
-        const current_let = letter(assert_exists(letters[bin_str.length - bi - 1]))
+        const current_let = assert_exists(letters[bin_str.length - bi - 1])
         const part = assert_exists(
           current_bit === '0' ? current_let
           : current_bit === '1' ? not(current_let)
@@ -187,15 +229,15 @@ export class TruthTable {
   }
 }
 
-export const recursively_evaluate_sentence = (eval_id: (id: string) => boolean, sentence: Sentence): boolean => {
+export const recursively_evaluate_sentence = (eval_letter: (l: SentenceMap['letter']) => boolean, sentence: Sentence): boolean => {
   // const evaluate = (sentence: Sentence): boolean => recursively_evaluate_sentence(assignments, sentence)
-  const evaluate = (sentence: Sentence): boolean => recursively_evaluate_sentence(eval_id, sentence)
+  const evaluate = (sentence: Sentence): boolean => recursively_evaluate_sentence(eval_letter, sentence)
   if (sentence.tag === 'value') {
     return sentence.value
   } else if (sentence.tag === 'letter') {
     // const assigned = assert_exists(assignments[sentence.id], `Letter '${sentence.id}' has no assignment during evaluation!`)
     // return assigned
-    return eval_id(sentence.id)
+    return eval_letter(sentence)
   } else if (sentence.tag === 'negation') {
     const sub_value = evaluate(sentence.sentence)
     return !sub_value
@@ -250,7 +292,7 @@ export const state_from_index = (letters: string[], state_index: number): Senten
 }
 
 // const evaluate_sentence = (assignments: Record<string, boolean>, sentence: Sentence): boolean => {
-export const evaluate_sentence = (eval_id: (id: string) => boolean, sentence: Sentence): boolean => {
+export const evaluate_sentence = (eval_letter: (l: SentenceMap['letter']) => boolean, sentence: Sentence): boolean => {
   const evaluate = (sentence: Sentence): boolean => {
     type StackItem = 
       | { tag: 'start', s: Sentence }
@@ -271,7 +313,7 @@ export const evaluate_sentence = (eval_id: (id: string) => boolean, sentence: Se
           // stack.push({ tag: 'finished', s: top.s, value: assert_exists(assignments[top.s.id]) })
           // args.unshift({ s: top.s, value: assert_exists(assignments[top.s.id]) })
           // value_map.set(top.s, assert_exists(assignments[top.s.id]))
-          value_map.set(top.s, eval_id(top.s.id))
+          value_map.set(top.s, eval_letter(top.s))
         } else if (top.s.tag === 'negation') {
           stack.push({ tag: 'partial', s: top.s })
           stack.push({ tag: 'start', s: top.s.sentence })
@@ -372,7 +414,7 @@ const probability_constraints = (tt: TruthTable, regular: boolean): Constraint[]
   return cs
 }
 
-type VariableLists = { real: string[], sentence: string[] }
+type VariableLists = { real: string[], sentence: SentenceMap['letter'][] }
 
 // Will modify letters array.
 const letters_in_constraint = (constraint: Constraint, letters: VariableLists = { real: [], sentence: [] }): VariableLists => {
@@ -436,11 +478,11 @@ const letters_in_real_expr = (expr: RealExpr, letters: VariableLists): VariableL
 }
 
 // Will modify letters array.
-const letters_in_sentence = (sentence: Sentence, letters: string[] = []): string[] => {
+const letters_in_sentence = (sentence: Sentence, letters: SentenceMap['letter'][] = []): SentenceMap['letter'][] => {
   if (sentence.tag === 'value') {
     return letters
   } else if (sentence.tag === 'letter') {
-    letters.push(sentence.id)
+    letters.push(sentence)
     return letters
   } else if (sentence.tag === 'negation') {
     return letters_in_sentence(sentence.sentence, letters)
@@ -451,7 +493,7 @@ const letters_in_sentence = (sentence: Sentence, letters: string[] = []): string
 }
 
 const translate = (constraints: Constraint[]): [VariableLists, TruthTable, Constraint[]] => {
-  const variables = { real: [] as string[], sentence: [] as string[] }
+  const variables = { real: [] as string[], sentence: [] as SentenceMap['letter'][] }
   for (const c of constraints) {
     letters_in_constraint(c, variables)
   }
@@ -835,7 +877,7 @@ const s_to_string = (s: S): string => {
 }
 
 import P from 'parsimmon'
-import { PrSat } from "./types"
+import { PrSat, SentenceMap } from "./types"
 
 const s_lang = P.createLanguage({
   s: (r) => P.alt(r.list, r.atom),
@@ -1190,19 +1232,22 @@ const make_generator = <T>(
   return gen
 }
 
-export const a2eid = (assignment: Record<string, boolean>) => (id: string): boolean => {
-  return assert_exists(assignment[id])
+// Only works for letters with index = 0.
+export const a2eid = (assignment: Record<string, boolean>) => (l: SentenceMap['letter']): boolean => {
+  return assert_exists(assignment[l.id])
 }
 
-export const random_letters_and_assignments = (random: Random, n_letters: number): [string[], (id: string) => boolean] => {
+// Letter ids must have a size equal to 1, so I should allow this function to generate a number
+// of letters greater than the size of the alphabet for this, but I don't want to right now.
+export const random_letters_and_assignments = (random: Random, n_letters: number): [SentenceMap['letter'][], (letter: SentenceMap['letter']) => boolean] => {
   assert(n_letters > 0, 'n_letters is <= 0!')
   const letter_options = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
   assert(n_letters <= letter_options.length, 'n_letters is more than the possible letters!')
-  const letters = letter_options.slice(0, n_letters).split('')
+  const letters: SentenceMap['letter'][] = letter_options.slice(0, n_letters).split('').map((id) => letter(id, 0))
 
   const assignment: Record<string, boolean> = {}
   for (const l of letters) {
-    assignment[l] = random.boolean()
+    assignment[l.id] = random.boolean()
   }
 
   return [letters, a2eid(assignment)]
@@ -1214,14 +1259,14 @@ export class SentenceFuzzer {
     readonly max_depth: number = 20,
   ) {}
 
-  generate(letter_ids: string[], depth: number = this.max_depth): Sentence {
-    assert(letter_ids.length > 0, 'Unable to generate sentence without at least one letter to choose from!')
+  generate(letters: SentenceMap['letter'][], depth: number = this.max_depth): Sentence {
+    assert(letters.length > 0, 'Unable to generate sentence without at least one letter to choose from!')
     assert(depth >= 0, 'Trying to generate a sentence with depth < 0!')
     const ae = assert_exists
 
     const fs: Record<Sentence['tag'], { arity: number, construct: (args: Sentence[]) => Sentence }> = {
       value: { arity: 0, construct: () => ({ tag: 'value', value: this.random.boolean() }) },
-      letter: { arity: 0, construct: () => ({ tag: 'letter', id: this.random.pick(letter_ids), index: 0 }) },
+      letter: { arity: 0, construct: () => this.random.pick(letters) },
       negation: { arity: 1, construct: ([s]) => ({ tag: 'negation', sentence: ae(s) }) },
       disjunction: { arity: 2, construct: ([l, r]) => ({ tag: 'disjunction', left: ae(l), right: ae(r) }) },
       conjunction: { arity: 2, construct: ([l, r]) => ({ tag: 'conjunction', left: ae(l), right: ae(r) }) },
@@ -1247,10 +1292,10 @@ export class RealExprFuzzer {
     this.sentence = sentence ?? new SentenceFuzzer(this.random, this.max_depth)
   }
 
-  generate(letter_ids: string[], depth: number = this.max_depth): RealExpr {
+  generate(letters: SentenceMap['letter'][], depth: number = this.max_depth): RealExpr {
     assert(depth >= 0, 'Trying to generate a sentence with depth < 0!')
     const ae = assert_exists
-    const sg = (depth: number) => this.sentence.generate(letter_ids, depth)
+    const sg = (depth: number) => this.sentence.generate(letters, depth)
 
     const fs: Record<RealExpr['tag'], { arity: number, construct: (args: RealExpr[]) => RealExpr }> = {
       variable: { arity: 0, construct: () => ({ tag: 'variable', id: this.random.string({ bounds: { lower: 1, upper: 3 }, characters: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' }) }) },
@@ -1286,10 +1331,10 @@ export class ConstraintFuzzer {
     this.real_expr = real_expr ?? new RealExprFuzzer(this.random, this.sentence, this.max_depth)
   }
 
-  generate(letter_ids: string[], depth: number = this.max_depth): Constraint {
+  generate(letters: SentenceMap['letter'][], depth: number = this.max_depth): Constraint {
     assert(depth >= 0, 'Trying to generate a sentence with depth < 0!')
     const ae = assert_exists
-    const eg = (depth: number) => this.real_expr.generate(letter_ids, depth)
+    const eg = (depth: number) => this.real_expr.generate(letters, depth)
 
     const fs: Record<Constraint['tag'], { arity: number, construct: (args: Constraint[]) => Constraint }> = {
       equal: { arity: 0, construct: () => ({ tag: 'equal', left: eg(5), right: eg(5) }) },

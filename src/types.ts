@@ -1,4 +1,4 @@
-import { setup_mutual_map } from "./tag_map"
+import { setup_mutual_map, UnionToTagMap } from "./tag_map"
 
 type Sentence =
   | { tag: 'value', value: boolean }
@@ -8,6 +8,7 @@ type Sentence =
   | { tag: 'conjunction', left: Sentence, right: Sentence }
   | { tag: 'conditional', left: Sentence, right: Sentence }
   | { tag: 'biconditional', left: Sentence, right: Sentence }
+export type SentenceMap = UnionToTagMap<'tag', Sentence>
 
 type RealExpr =
   | { tag: 'literal', value: number }

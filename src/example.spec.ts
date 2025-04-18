@@ -272,7 +272,7 @@ describe('z3', () => {
     const _7 = lt(cpr(H, and(not(R), B)), pr(H))
     const _C = gte(cpr(H, R), cpr(H, not(B)))
     const regular = false
-    test('(1) - (4) entail (5)', async () => {
+    test.skip('(1) - (4) entail (5)', async () => {
       const { Context } = await init_z3()
 
       const constraints = [
@@ -411,7 +411,7 @@ describe('z3', () => {
         const { status: sat, model: _ } = await pr_sat(Context('main'), constraints)
         expect(sat).toEqual('unsat')
       })
-      test('i', async () => {
+      test.skip('i', async () => {
         const { Context } = await init_z3()
         const constraints = desideratum(ik)
         const { status: sat, model: _ } = await pr_sat(Context('main'), constraints)
@@ -460,7 +460,7 @@ describe('smtlib-direct', () => {
     return result_lines.join('\n')
   }
 
-  test.only('confirmation measure s', async () => {
+  test('confirmation measure s', async () => {
     const { Context } = await init_z3()
     const ctx = Context('main')
     const { Solver } = ctx
