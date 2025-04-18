@@ -203,7 +203,7 @@ export const grammar_to_inits = <TK extends string, MM extends MutualMap<TK>>(ta
         // We only check the primitive keys!
         if (typeof sub_spec !== 'string' && sub_spec.tag === 'primitive') {
           // const sub_input = assert_exists(input[spec_key])
-          const error = check_primitive(sub_spec, input)
+          const error = check_primitive(sub_spec, input[spec_key])
           if (error !== undefined) {
             throw new Error(`Error checking primitive at key '${spec_key}' during '${inner_key}' init: ${error}`)
           }
@@ -590,20 +590,20 @@ export const grammar_to_savers = <TK extends string, MM extends MutualMap<TK>>(t
 }
 
 // undefined on success, string on error.
-const check_primitive = (spec: UnionToTagMap<'tag', Exclude<MutualMapSpec, string>>['primitive'], p: UnionToTagMap<'tag', Exclude<MutualMapSnap, string>>['primitive']): string | undefined => {
+const check_primitive = (spec: UnionToTagMap<'tag', Exclude<MutualMapSpec, string>>['primitive'], p: UnionToTagMap<'tag', Exclude<MutualMapSnap, string>>['primitive']['value']): string | undefined => {
   if (spec.type === 'boolean') {
     return undefined
   } else if (spec.type === 'number') {
-    if (typeof p.value !== 'number') {
-      return `Expected number, got ${typeof p.value}!`
-    } else if (spec.constraints?.is_integer && !Number.isInteger(p.value)) {
-      return `Expected integer, got a non-integer value '${p.value}'!`
+    if (typeof p !== 'number') {
+      return `Expected number, got ${typeof p}!`
+    } else if (spec.constraints?.is_integer && !Number.isInteger(p)) {
+      return `Expected integer, got a non-integer value '${p}'!`
     } else if (spec.constraints?.bounds !== undefined) {
       const { lower, upper } = spec.constraints.bounds
-      if (lower !== undefined && p.value < lower) {
-        return `Expected integer in range [${lower}, ${upper}], got integer '${p.value}' breaking the lower bound!`
-      } else if (upper !== undefined && p.value > upper) {
-        return `Expected integer in range [${lower}, ${upper}], got integer '${p.value}' breaking the upper bound!`
+      if (lower !== undefined && p < lower) {
+        return `Expected integer in range [${lower}, ${upper}], got integer '${p}' breaking the lower bound!`
+      } else if (upper !== undefined && p > upper) {
+        return `Expected integer in range [${lower}, ${upper}], got integer '${p}' breaking the upper bound!`
       } else {
         return undefined
       }

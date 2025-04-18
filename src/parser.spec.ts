@@ -16,7 +16,7 @@ const { eq, neq, lt, lte, gt, gte, cnot, cand, cor, cimp, ciff } = constraint_bu
 const [A, B, C] = [letter('A'), letter('B'), letter('C')]
 const [D, E, F] = [letter('D'), letter('E'), letter('F')]
 
-const shared_random = new Random('something')
+const shared_random = new Random()
 const fuzz_options: FuzzerOptions<any, any> = { target_depth: 6, exclude: { RealExpr: ['state_variable_sum'] } }
 const fuzzers = PrSatFuncs.first_order().fuzzers(shared_random)
 
@@ -35,6 +35,8 @@ describe('parse', () => {
     test_parse('A', A)
     test_parse('B', B)
     test_parse('C', C)
+    test_parse('A3', letter('A', 3))
+    test_parse('A38389232', letter('A', 38389232))
     test_parse('~A', not(A))
     test_parse('~\t \nA', not(A))
     test_parse('~~~~B', not(not(not(not(B)))))
@@ -110,7 +112,7 @@ describe('parse', () => {
   const random = shared_random
   describe(`fuzzed (seed = ${random.seed_string})`, () => {
     // const n_letters = 5
-    const n_examples = 5
+    const n_examples = 10
     // const sentence_fuzzer = new SentenceFuzzer(new Random(), max_depth)
     // const [letters] = random_letters_and_assignments(random, n_letters)
 

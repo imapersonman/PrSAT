@@ -81,7 +81,7 @@ describe('TruthTable', () => {
 describe('translate', () => {
   describe('3 sentence-letters', () => {
     const tt = new TruthTable(['A', 'B', 'C'])
-    const [A, B, C] = [letter({ id: 'A' }), letter({ id: 'B' }), letter({ id: 'C' })]
+    const [A, B, C] = [letter({ id: 'A', index: 0 }), letter({ id: 'B', index: 0 }), letter({ id: 'C', index: 0 })]
     test('Pr(A)', () => {
       const actual = translate_real_expr(tt, pr({ arg: A }))
       const expected = svs({ indices: [0, 1, 2, 3] })
@@ -173,7 +173,7 @@ describe('parse_s', () => {
 
 describe('state_from_index', () => {
   // 0 sentences implies a single state that is always true.
-  const [A, B, C] = [letter({ id: 'A' }), letter({ id: 'B' }), letter({ id: 'C' })]
+  const [A, B, C] = [letter({ id: 'A', index: 0 }), letter({ id: 'B', index: 0 }), letter({ id: 'C', index: 0 })]
   const top = val(true)
   test('0 vars', () => expect(state_from_index([], 0)).toEqual(top))
   test('1 var, s_0', () => expect(state_from_index(['A'], 0)).toEqual(A))
@@ -201,7 +201,7 @@ describe('state_from_index', () => {
 
 // const recursively_evaluate_sentence = (assignments: Record<string, boolean>, sentence: Sentence): boolean => {
 describe('evaluate_sentence', () => {
-  const [A, B] = [letter({ id: 'A' }), letter({ id: 'B' })]
+  const [A, B] = [letter({ id: 'A', index: 0 }), letter({ id: 'B', index: 0 })]
   const eval_id = a2eid({})
   test('⊤', () => expect(evaluate_sentence(eval_id, val(true))).toEqual(true))
   test('⊥', () => expect(evaluate_sentence(eval_id, val(false))).toEqual(false))
@@ -310,7 +310,7 @@ describe('translate', () => {
   test('something')
   // const { power } = real_expr_builder
   const { power } = PrSatUtils.inits.RealExpr
-  const A = letter({ id: 'A' })
+  const A = letter({ id: 'A', index: 0 })
   test('translate doesn\'t throw with power', () => {
     translate_real_expr(new TruthTable(['A']), power({ base: pr({ arg: A }), exponent: lit({ value: 2 }) }))
   })

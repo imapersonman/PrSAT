@@ -145,7 +145,7 @@ const ConstraintLang = P.createLanguage({
   ),
   WrappedSentence: (r) => P.seq(P.string('('), P.optWhitespace, r.Sentence, P.optWhitespace, P.string(')'))
     .map(([_l, _lp, s, _rp, _r]) => s),
-  SL: () => P.regexp(/[A-Z]/).map(letter),
+  SL: () => P.seq(P.regexp(/[A-Z]/), P.regexp(/([1-9][0-9]*)?/)).map(([id, index]) => letter(id, index.length > 0 ? parseInt(index) : 0)),
   Not: (r) => P.seq(stag_to_c_parser('negation'), P.optWhitespace, r.SentenceFactor).map(([_1, _2, s]) => not(s)),
   And: (r) => r.SentenceFactor.sepBy(P.seq(P.optWhitespace, stag_to_c_parser('conjunction'), P.optWhitespace))
     .assert((operands) => operands.length >= 2, 'And expects at least two operands!')

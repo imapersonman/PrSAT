@@ -7,7 +7,7 @@ type Constraint = PrSat['Constraint']
 
 export const sentence_builder = {
   val: (v: boolean): Sentence => ({ tag: 'value', value: v }),
-  letter: (id: string): Sentence => ({ tag: 'letter', id }),
+  letter: (id: string, index?: number): Sentence => ({ tag: 'letter', id, index: index ?? 0 }),
   not: (s: Sentence): Sentence => ({ tag: 'negation', sentence: s }),
   and: (left: Sentence, right: Sentence): Sentence => ({ tag: 'conjunction', left, right }),
   or: (left: Sentence, right: Sentence): Sentence => ({ tag: 'disjunction', left, right }),
@@ -615,7 +615,7 @@ const sentence_to_gen_string = (s: Sentence, gens: StringGens<'tag', Sentence>):
   if (s.tag === 'value') {
     return s.value ? '⊤' : '⊥'
   } else if (s.tag === 'letter') {
-    return s.id
+    return `${s.id}${s.index > 0 ? s.index : ''}`
   } else if (s.tag === 'negation') {
     return `${gens['negation']()}${wrap(s.sentence)}`
   } else {
@@ -1221,7 +1221,7 @@ export class SentenceFuzzer {
 
     const fs: Record<Sentence['tag'], { arity: number, construct: (args: Sentence[]) => Sentence }> = {
       value: { arity: 0, construct: () => ({ tag: 'value', value: this.random.boolean() }) },
-      letter: { arity: 0, construct: () => ({ tag: 'letter', id: this.random.pick(letter_ids) }) },
+      letter: { arity: 0, construct: () => ({ tag: 'letter', id: this.random.pick(letter_ids), index: 0 }) },
       negation: { arity: 1, construct: ([s]) => ({ tag: 'negation', sentence: ae(s) }) },
       disjunction: { arity: 2, construct: ([l, r]) => ({ tag: 'disjunction', left: ae(l), right: ae(r) }) },
       conjunction: { arity: 2, construct: ([l, r]) => ({ tag: 'conjunction', left: ae(l), right: ae(r) }) },
