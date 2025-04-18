@@ -426,6 +426,14 @@ const constraint_grammar: ConstraintMutualMap['grammar']= {
         id: {
           tag: 'primitive',
           type: 'string'
+        },
+        index: {
+          tag: 'primitive',
+          type: 'number',
+          constraints: {
+            bounds: { lower: 0 },
+            is_integer: true,
+          }
         }
       },
     }
@@ -459,8 +467,8 @@ const constraint_grammar_to_recursors = (cg: ConstraintMutualMap['grammar']): Mu
 describe('constraint_inits', () => {
   const inits = constraint_grammar_to_inits(constraint_grammar)
   const { letter, conjunction } = inits.Sentence
-  test('A', () => expect(letter({ id: 'A' })).toEqual({ tag: 'letter', id: 'A' }))
-  test('A & B', () => expect(conjunction({ left: letter({ id: 'A' }), right: letter({ id: 'B' }) })).toEqual({ tag: 'conjunction', left: { tag: 'letter', id: 'A' }, right: { tag: 'letter', id: 'B' } }))
+  test('A', () => expect(letter({ id: 'A', index: 0 })).toEqual({ tag: 'letter', id: 'A' }))
+  test('A & B', () => expect(conjunction({ left: letter({ id: 'A', index: 0 }), right: letter({ id: 'B', index: 0 }) })).toEqual({ tag: 'conjunction', left: { tag: 'letter', id: 'A' }, right: { tag: 'letter', id: 'B' } }))
 })
 
 describe('constraint_recursors', () => {
@@ -486,11 +494,11 @@ describe('constraint_recursors', () => {
         letter: ({ id }) => id,
       })
 
-      test('A', () => expect(sentence_to_string({ tag: 'letter', id: 'A' })).toEqual('A'))
-      test('~A', () => expect(sentence_to_string({ tag: 'negation', sentence: { tag: 'letter', id: 'A' } })).toEqual('~A'))
-      test('~~A', () => expect(sentence_to_string({ tag: 'negation', sentence: { tag: 'negation', sentence: { tag: 'letter', id: 'A' } } })).toEqual('~~A'))
-      test('A & B', () => expect(sentence_to_string({ tag: 'conjunction', left: { tag: 'letter', id: 'A' }, right: { tag: 'letter', id: 'B' } })).toEqual('A & B'))
-      test('~(A & B)', () => expect(sentence_to_string({ tag: 'negation', sentence: { tag: 'conjunction', left: { tag: 'letter', id: 'A' }, right: { tag: 'letter', id: 'B' } } })).toEqual('~(A & B)'))
+      test('A', () => expect(sentence_to_string({ tag: 'letter', id: 'A', index: 0 })).toEqual('A'))
+      test('~A', () => expect(sentence_to_string({ tag: 'negation', sentence: { tag: 'letter', id: 'A', index: 0 } })).toEqual('~A'))
+      test('~~A', () => expect(sentence_to_string({ tag: 'negation', sentence: { tag: 'negation', sentence: { tag: 'letter', id: 'A', index: 0 } } })).toEqual('~~A'))
+      test('A & B', () => expect(sentence_to_string({ tag: 'conjunction', left: { tag: 'letter', id: 'A', index: 0 }, right: { tag: 'letter', id: 'B', index: 0 } })).toEqual('A & B'))
+      test('~(A & B)', () => expect(sentence_to_string({ tag: 'negation', sentence: { tag: 'conjunction', left: { tag: 'letter', id: 'A', index: 0 }, right: { tag: 'letter', id: 'B', index: 0 } } })).toEqual('~(A & B)'))
     })
     describe('letters_in', () => {
       const letters_in_1 = recursors.Sentence<string[], string[]>(() => [], {
@@ -545,14 +553,14 @@ describe('constraint_recursors', () => {
       })
 
       describe('mutable acc', () => {
-        test('A', () => expect(letters_in_1({ tag: 'letter', id: 'A' })).toEqual(['A']))
-        test('~A', () => expect(letters_in_1({ tag: 'negation', sentence: { tag: 'letter', id: 'B' } })).toEqual(['B']))
-        test('A & B', () => expect(letters_in_1({ tag: 'conjunction', left: { tag: 'letter', id: 'A' }, right: { tag: 'letter', id: 'B' } })).toEqual(['A', 'B']))
+        test('A', () => expect(letters_in_1({ tag: 'letter', id: 'A', index: 0 })).toEqual(['A']))
+        test('~A', () => expect(letters_in_1({ tag: 'negation', sentence: { tag: 'letter', id: 'B', index: 0 } })).toEqual(['B']))
+        test('A & B', () => expect(letters_in_1({ tag: 'conjunction', left: { tag: 'letter', id: 'A', index: 0 }, right: { tag: 'letter', id: 'B', index: 0 } })).toEqual(['A', 'B']))
       })
       describe('immutable acc', () => {
-        test('A', () => expect(letters_in_2({ tag: 'letter', id: 'A' })).toEqual(['A']))
-        test('~B', () => expect(letters_in_2({ tag: 'negation', sentence: { tag: 'letter', id: 'B' } })).toEqual(['B']))
-        test('A & B', () => expect(letters_in_2({ tag: 'conjunction', left: { tag: 'letter', id: 'A' }, right: { tag: 'letter', id: 'B' } })).toEqual(['A', 'B']))
+        test('A', () => expect(letters_in_2({ tag: 'letter', id: 'A', index: 0 })).toEqual(['A']))
+        test('~B', () => expect(letters_in_2({ tag: 'negation', sentence: { tag: 'letter', id: 'B', index: 0 } })).toEqual(['B']))
+        test('A & B', () => expect(letters_in_2({ tag: 'conjunction', left: { tag: 'letter', id: 'A', index: 0 }, right: { tag: 'letter', id: 'B', index: 0 } })).toEqual(['A', 'B']))
       })
     })
   })
@@ -564,7 +572,7 @@ describe('constraint_savers', () => {
     RealExpr: { probability: pr },
   } = constraint_grammar_to_inits(constraint_grammar)
   const savers = constraint_grammar_to_savers(constraint_grammar)
-  const [A, B] = [letter({ id: 'A' }), letter({ id: 'B' })]
+  const [A, B] = [letter({ id: 'A', index: 0 }), letter({ id: 'B', index: 0 })]
   const AandB = and({ left: A, right: B })
   const PrAandB = pr({ arg: AandB })
 
@@ -637,7 +645,7 @@ describe('constraint_loaders', () => {
     RealExpr: { probability: pr },
   } = constraint_grammar_to_inits(constraint_grammar)
   const loaders = constraint_grammar_to_loaders(constraint_grammar)
-  const [A, B] = [letter({ id: 'A' }), letter({ id: 'B' })]
+  const [A, B] = [letter({ id: 'A', index: 0 }), letter({ id: 'B', index: 0 })]
   const AandB = and({ left: A, right: B })
   const PrAandB = pr({ arg: AandB })
 
