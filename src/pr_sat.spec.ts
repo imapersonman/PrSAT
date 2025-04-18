@@ -24,8 +24,6 @@ const divide = (numerator: RealExpr, denominator: RealExpr): RealExpr => over({ 
 
 const { eq } = constraint_builder
 
-test('fail', () => expect(false).toBeTruthy())
-
 describe('TruthTable', () => {
   test('iterator', () => {
     const tt = new TruthTable(['A', 'B', 'C'])
