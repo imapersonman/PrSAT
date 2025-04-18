@@ -24,6 +24,8 @@ const divide = (numerator: RealExpr, denominator: RealExpr): RealExpr => over({ 
 
 const { eq } = constraint_builder
 
+test('fail', () => expect(false).toBeTruthy())
+
 describe('TruthTable', () => {
   test('iterator', () => {
     const tt = new TruthTable(['A', 'B', 'C'])
@@ -81,7 +83,7 @@ describe('TruthTable', () => {
 describe('translate', () => {
   describe('3 sentence-letters', () => {
     const tt = new TruthTable(['A', 'B', 'C'])
-    const [A, B, C] = [letter({ id: 'A' }), letter({ id: 'B', index: 0 }), letter({ id: 'C', index: 0 })]
+    const [A, B, C] = [letter({ id: 'A', index: 0 }), letter({ id: 'B', index: 0 }), letter({ id: 'C', index: 0 })]
     test('Pr(A)', () => {
       const actual = translate_real_expr(tt, pr({ arg: A }))
       const expected = svs({ indices: [0, 1, 2, 3] })
