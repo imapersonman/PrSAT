@@ -4,12 +4,12 @@ import { el, math_el } from "./el";
 import { assert, assert_exists, assert_result, Res } from "./utils";
 import { debounce } from "./debounce";
 import { parse_constraint } from "./parser";
-import { constraint_to_string, parse_s, possible_constraint_connectives, possible_sentence_connectives, sentence_to_string, TruthTable } from "./pr_sat";
+import { constraint_to_string, parse_s, possible_constraint_connectives, possible_sentence_connectives, TruthTable } from "./pr_sat";
 import { init_z3, pr_sat } from "./z3_integration";
 import { match_s, S, spv, clause, s_to_string } from "./s";
 
 import './style.css'
-import { PrSat } from "./types";
+import { PrSat, SentenceMap } from "./types";
 
 const DEFAULT_DEBOUNCE_MS = 150
 const CONSTRAINT_INPUT_PLACEHOLDER = 'Enter constraint'
@@ -213,6 +213,10 @@ const real_expr_to_html = (expr: RealExpr): MathMLElement => {
   }
 }
 
+const letter_string = (l: SentenceMap['letter']): string =>
+  `${l.id}${l.index > 0 ? l.index : ''}`
+  
+
 const sentence_to_html = (s: Sentence): MathMLElement => {
   const sub = (s: Sentence) => sentence_to_html(s)
   const wrap = (s: Sentence, exclude: Sentence['tag'][]) => {
@@ -229,11 +233,8 @@ const sentence_to_html = (s: Sentence): MathMLElement => {
     const text = s.value ? '⊤' : '⊥'
     return math_el('mi', {}, text)
   } else if (s.tag === 'letter') {
-    const me = math_el('mi', {}, s.id)
-    if (s.index > 0) {
-      me.append(s.index.toString())
-    }
-    return me
+    const id = letter_string(s)
+    return math_el('mi', { mathvariant: 'normal' }, id)
   } else if (s.tag === 'negation') {
     const op = math_el('mo', {}, '~')
     return math_el('mrow', {}, op, wrap(s.sentence, ['negation', 'letter', 'value']))
@@ -599,24 +600,35 @@ const state_id = (index: number | string): MathMLElement => {
 
 const model_display = async <CtxKey extends string>(ctx: Context<CtxKey>, model: [TruthTable, Model<CtxKey>]): Promise<HTMLElement> => {
   // One column per sentence-letter
-  // Header has the form "A1 | A2 | ... | An | "
+  // Header has the form "A1 | A2 | ... | An | a_i | Assignment"
 
   const [tt, z3_model] = model
   const model_assignments = await model_to_assignments(ctx, z3_model)
   const body = el('tbody', {})
-  const head = el('thead', {},
-    el('tr', {},
-      el('th', {}, 'State'),
-      el('th', {}, state_id('i')),
-      el('th', {}, 'Assignment')))
-  for (const [index, ma] of model_assignments.entries()) {
-    const state = tt.state_from_index(index)
-    const state_string = sentence_to_string(state)
+  const head_row = el('tr', {})
+  const head = el('thead', {}, head_row)
+  for (const l of tt.letters()) {
+    head_row.appendChild(el('th', {}, letter_string(l)))
+  }
+  head_row.appendChild(el('th', { class: 'dv' }))
+  head_row.appendChild(el('th', {}, state_id('i')))
+  head_row.appendChild(el('th', { class: 'dv' }))
+  head_row.appendChild(el('th', {}, 'Assignment'))
+
+  for (const [index, ma] of model_assignments.entries()) {  // rows
+    // const state = tt.state_from_index(index)
+    // const state_string = sentence_to_string(state)
     const assignment_html = model_assignment_display(ma)
-    const row = el('tr', {},
-      el('td', {}, state_string),
-      el('td', {}, state_id(index)),
-      el('td', {}, assignment_html))
+    const row = el('tr', {})
+    for (const l of tt.letters()) {
+      const letter_value = tt.letter_value_from_index(l, index)
+      const value_string = letter_value ? '⊤' : '⊥'
+      row.appendChild(el('td', {}, value_string))
+    }
+    row.appendChild(el('td', { class: 'dv' }))
+    row.appendChild(el('td', {}, state_id(index)))
+    row.appendChild(el('td', { class: 'dv' }))
+    row.appendChild(el('td', {}, assignment_html))
     body.appendChild(row)
   }
   const e = el('table', {},

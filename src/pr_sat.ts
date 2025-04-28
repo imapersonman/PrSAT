@@ -135,6 +135,16 @@ export class TruthTable {
     return assignments
   }
 
+  letter_value_from_index(l: SentenceMap['letter'], index: number): boolean {
+    assert(0 <= index && index < this.state_table.length, 'State index out of bounds!')
+    const state = this.state_table[index]
+    return state.has(l)
+  }
+
+  letters(): Iterable<SentenceMap['letter']> {
+    return this.letter_ids
+  }
+
   n_letters(): number {
     return this.letter_ids.length
   }
