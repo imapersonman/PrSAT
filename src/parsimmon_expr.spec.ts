@@ -4,7 +4,6 @@ import { MyMath } from './parsimmon_expr';
 
 test.only('something', () => {
   // console.log(MyMath.tryParse('2 + ((3 * 4)) / 1 - 3 ^ (2!)'))
-  console.log(MyMath.tryParse('--2'))
   const evaluate = (s: S): number => {
     const [a, b] = [spv('a'), spv('b')]
     return match_s(s, [

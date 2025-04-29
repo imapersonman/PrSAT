@@ -800,10 +800,6 @@ export const combine_inverse = (svs1: RealExprMap['state_variable_sum'], svs2: R
   const svs1_diff_svs2 = svs1.indices.filter((svs1i) => !in_svs2.has(svs1i))
   const svs2_diff_svs1 = svs2.indices.filter((svs2i) => !in_svs1.has(svs2i))
 
-  // console.log('1 diff 2:', real_expr_to_string(svs(svs1_diff_svs2)))
-  // console.log('2 diff 1:', real_expr_to_string(svs(svs2_diff_svs1)))
-  // console.log()
-
   if (svs1_diff_svs2.length === 0 && svs2_diff_svs1.length === 0) {
     return lit(1)
   } else if (svs2_diff_svs1.length === 0) {
@@ -817,20 +813,11 @@ export const combine_inverse = (svs1: RealExprMap['state_variable_sum'], svs2: R
 
 export const eliminate_state_variable_index_in_svs = (index: number, inverted_redef: RealExprMap['state_variable_sum'], subject_svs: RealExprMap['state_variable_sum']): RealExpr => {
   const subject_wo_index = subject_svs.indices.filter((svsi) => svsi !== index)
-  console.log('eliminate_state_variable_index_in_svs')
-  console.log('index:', index)
-  console.log('inverted_redef:', real_expr_to_string(inverted_redef))
-  console.log('subject_svs:', real_expr_to_string(subject_svs))
-  console.log('should return simplified (unless index_in_subject is false):', real_expr_to_string(plus(svs(subject_wo_index), minus(lit(1), inverted_redef))))
   const index_in_subject = subject_wo_index.length !== subject_svs.indices.length  // If it was removed, it was originally in it.
 
   const result = index_in_subject
     ? combine_inverse(svs(subject_wo_index), inverted_redef)
     : subject_svs
-  
-  console.log('index_in_subject:', index_in_subject)
-  console.log('result:', real_expr_to_string(result))
-  console.log()
   
   return result
 }

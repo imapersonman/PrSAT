@@ -182,10 +182,8 @@ export const pr_sat = async <CtxKey extends string>(
   const index_to_eliminate = tt.n_states() - 1
   const enriched_constraints = enrich_constraints(tt, index_to_eliminate, regular, translated)
   const [state_index_redef, elim_constraints] = eliminate_state_variable_index(tt.n_states(), index_to_eliminate, enriched_constraints)
-  console.log('translated', elim_constraints.map(constraint_to_string))
 
   const smtlib_string = constraints_to_smtlib_string(tt, index_to_eliminate, elim_constraints)
-  console.log(smtlib_string)
   solver.fromString(smtlib_string)
   const result = await solver.check()
 
