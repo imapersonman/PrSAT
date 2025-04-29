@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest"
 
 import { Random } from "./random"
 import { assert, assert_exists } from "./utils"
-import { a2eid, constraint_builder, evaluate_sentence, parse_s, random_letters_and_assignments, real_expr_to_smtlib, recursively_evaluate_sentence, SentenceFuzzer, state_from_index, translate_constraint, translate_real_expr, TruthTable } from "./pr_sat"
+import { a2eid, combine_inverse, constraint_builder, eliminate_state_variable_index_in_svs, evaluate_sentence, parse_s, random_letters_and_assignments, real_expr_to_smtlib, recursively_evaluate_sentence, SentenceFuzzer, state_from_index, translate_constraint, translate_real_expr, TruthTable } from "./pr_sat"
 import { PrSat, PrSatFuncs as PrSatUtils, SentenceMap } from "./types"
 
 type Sentence = PrSat['Sentence']
@@ -23,18 +23,19 @@ const minus = (left: RealExpr, right: RealExpr): RealExpr => subtract({ left, ri
 const divide = (numerator: RealExpr, denominator: RealExpr): RealExpr => over({ numerator, denominator })
 
 const { eq } = constraint_builder
+const make_tt = (letters: SentenceMap['letter'][]): TruthTable => new TruthTable({ real: [], sentence: letters })
 
 describe('TruthTable', () => {
   test('iterator', () => {
-    const tt = new TruthTable([letter({ id: 'A', index: 0 }), letter({ id: 'B', index: 0 }), letter({ id: 'C', index: 0 })])
+    const tt = make_tt([letter({ id: 'A', index: 0 }), letter({ id: 'B', index: 0 }), letter({ id: 'C', index: 0 })])
     expect([...tt.state_indices()]).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
   })
   test('n states', () => {
-    const tt = new TruthTable([letter({ id: 'A', index: 1 }), letter({ id: 'B', index: 2 }), letter({ id: 'C', index: 3 })])
+    const tt = make_tt([letter({ id: 'A', index: 1 }), letter({ id: 'B', index: 2 }), letter({ id: 'C', index: 3 })])
     expect([...tt.state_indices()]).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
   })
   test('no letters', () => {
-    const tt = new TruthTable([])
+    const tt = make_tt([])
     // Shouldn't throw!
     tt.compute_dnf(val(true))
   })
@@ -85,7 +86,7 @@ describe('TruthTable', () => {
 describe('translate', () => {
   describe('3 sentence-letters', () => {
     const [A, B, C] = [letter({ id: 'A', index: 0 }), letter({ id: 'B', index: 0 }), letter({ id: 'C', index: 0 })]
-    const tt = new TruthTable([A, B, C])
+    const tt = make_tt([A, B, C])
     test('Pr(A)', () => {
       const actual = translate_real_expr(tt, pr({ arg: A }))
       const expected = svs({ indices: [0, 1, 2, 3] })
@@ -316,7 +317,7 @@ describe('translate', () => {
   const { power } = PrSatUtils.inits.RealExpr
   const A = letter({ id: 'A', index: 0 })
   test('translate doesn\'t throw with power', () => {
-    translate_real_expr(new TruthTable([A]), power({ base: pr({ arg: A }), exponent: lit({ value: 2 }) }))
+    translate_real_expr(make_tt([A]), power({ base: pr({ arg: A }), exponent: lit({ value: 2 }) }))
   })
 })
 
@@ -343,7 +344,7 @@ describe('state dnf stuff', () => {
     const n = fuzzer.random.integer({ lower: 1, upper: max_letters })
     const [letters, eval_letter] = random_letters_and_assignments(fuzzer.random, n)
     // const [letters, eval_id] = random_letters_and_assignments(fuzzer.random, max_letters)
-    const tt = new TruthTable(letters)
+    const tt = make_tt(letters)
     const sentence = fuzzer.generate(letters)
     examples.push({ sentence, tt, letters, eval_letter })
   }
@@ -404,5 +405,33 @@ describe('*_to_smtlib', () => {
     const expr = divide(a, divide(b, divide(c, divide(d, e))))
     const expected = ['/', 'a', ['/', 'b', ['/', 'c', ['/', 'd', 'e']]]]
     expect(real_expr_to_smtlib(expr)).toEqual(expected)
+  })
+})
+
+describe('combine_inverse', () => {
+  test('[2, 3, 6], [0, 1, 2, 3, 4, 5, 6]', () => {
+    const svs1 = svs({ indices: [2, 3, 6] })
+    const svs2 = svs({ indices: [0, 1, 2, 3, 4, 5, 6] })
+    expect(combine_inverse(svs1, svs2)).toEqual(minus(lit({ value: 1 }), svs({ indices: [0, 1, 4, 5] })))
+  })
+  test('[0, 1, 2, 3, 4, 5, 6], [0, 1, 2, 3, 4, 5, 6]', () => {
+    const svs1 = svs({ indices: [0, 1, 2, 3, 4, 5, 6] })
+    const svs2 = svs({ indices: [0, 1, 2, 3, 4, 5, 6] })
+    expect(combine_inverse(svs1, svs2)).toEqual(lit({ value: 1 }))
+  })
+})
+
+describe('eliminate_state_variable_index_in_svs', () => {
+  test('7, [0, 1, 2, 3, 4, 5, 6], [2, 3, 6, 7]', () => {
+    const inverted_redef = svs({ indices: [0, 1, 2, 3, 4, 5, 6] })
+    const subject_svs = svs({ indices: [2, 3, 6, 7] })
+    const result = eliminate_state_variable_index_in_svs(7, inverted_redef, subject_svs)
+    expect(result).toEqual(minus(lit({ value: 1 }), svs({ indices: [0, 1, 4, 5] })))
+  })
+  test('7, [0, 1, 2, 3, 4, 5, 6], [0, 1, 2, 3, 4, 5, 6, 7]', () => {
+    const inverted_redef = svs({ indices: [0, 1, 2, 3, 4, 5, 6] })
+    const subject_svs = svs({ indices: [0, 1, 2, 3, 4, 5, 6, 7] })
+    const result = eliminate_state_variable_index_in_svs(7, inverted_redef, subject_svs)
+    expect(result).toEqual(lit({ value: 1 }))
   })
 })

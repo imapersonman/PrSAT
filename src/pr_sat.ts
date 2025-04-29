@@ -18,22 +18,22 @@ const { letter, val, not, and } = sentence_builder
 // const { letter, value: val, negation: not, conjunction: and } = PrSatFuncs.inits.Sentence
 
 export const real_expr_builder = {
-  lit: (value: number): RealExpr => {
+  lit: (value: number): RealExprMap['literal'] => {
     assert(value >= 0, `RealExpr literal initialized with a negative value '${value}'!`)
     return ({ tag: 'literal', value })
   },
-  vbl: (id: string): RealExpr => ({ tag: 'variable', id }),
-  svs: (indices: number[]): RealExpr => ({ tag: 'state_variable_sum', indices }),
-  pr: (arg: Sentence): RealExpr => ({ tag: 'probability', arg }),
-  cpr: (arg: Sentence, given: Sentence): RealExpr => ({ tag: 'given_probability', arg, given }),
-  neg: (expr: RealExpr): RealExpr => ({ tag: 'negative', expr }),
-  plus: (left: RealExpr, right: RealExpr): RealExpr => ({ tag: 'plus', left, right }),
-  minus: (left: RealExpr, right: RealExpr): RealExpr => ({ tag: 'minus', left, right }),
-  multiply: (left: RealExpr, right: RealExpr): RealExpr => ({ tag: 'multiply', left, right }),
-  divide: (numerator: RealExpr, denominator: RealExpr): RealExpr => ({ tag: 'divide', numerator, denominator }),
-  power: (base: RealExpr, exponent: RealExpr): RealExpr => ({ tag: 'power', base, exponent }),
+  vbl: (id: string): RealExprMap['variable'] => ({ tag: 'variable', id }),
+  svs: (indices: number[]): RealExprMap['state_variable_sum'] => ({ tag: 'state_variable_sum', indices }),
+  pr: (arg: Sentence): RealExprMap['probability'] => ({ tag: 'probability', arg }),
+  cpr: (arg: Sentence, given: Sentence): RealExprMap['given_probability'] => ({ tag: 'given_probability', arg, given }),
+  neg: (expr: RealExpr): RealExprMap['negative'] => ({ tag: 'negative', expr }),
+  plus: (left: RealExpr, right: RealExpr): RealExprMap['plus'] => ({ tag: 'plus', left, right }),
+  minus: (left: RealExpr, right: RealExpr): RealExprMap['minus'] => ({ tag: 'minus', left, right }),
+  multiply: (left: RealExpr, right: RealExpr): RealExprMap['multiply'] => ({ tag: 'multiply', left, right }),
+  divide: (numerator: RealExpr, denominator: RealExpr): RealExprMap['divide'] => ({ tag: 'divide', numerator, denominator }),
+  power: (base: RealExpr, exponent: RealExpr): RealExprMap['power'] => ({ tag: 'power', base, exponent }),
 }
-const { svs, lit } = real_expr_builder
+const { svs, lit, minus, plus } = real_expr_builder
 // const { state_variable_sum: svs, literal: lit } = PrSatFuncs.inits.RealExpr
 
 export const constraint_builder = {
@@ -49,7 +49,7 @@ export const constraint_builder = {
   cimp: (left: Constraint, right: Constraint): Constraint => ({ tag: 'conditional', left, right }),
   ciff: (left: Constraint, right: Constraint): Constraint => ({ tag: 'biconditional', left, right }),
 }
-const { gt, gte, eq, cnot } = constraint_builder
+const { gt, gte, eq, cnot, lte, lt } = constraint_builder
 
 // https://stackoverflow.com/questions/9939760/how-do-i-convert-an-integer-to-binary-in-javascript
 const to_bin_str = (n: number) => (n >>> 0).toString(2)
@@ -104,8 +104,8 @@ export class TruthTable {
   // has that letter set to true.
   private readonly state_table: LetterSet[]
 
-  constructor(letters: SentenceMap['letter'][]) {
-    this.letter_ids = [...new LetterSet(letters)].sort(comp_letters)
+  constructor(readonly variables: Readonly<VariableLists>) {
+    this.letter_ids = [...new LetterSet(variables.sentence)].sort(comp_letters)
     this.state_table = TruthTable.enumerate_states(this.letter_ids)
   }
 
@@ -415,11 +415,12 @@ export const evaluate_sentence = (eval_letter: (l: SentenceMap['letter']) => boo
   return evaluate(sentence)
 }
 
-const probability_constraints = (tt: TruthTable, regular: boolean): Constraint[] => {
-  const sis = [...tt.state_indices()]
+const probability_constraints = (tt: TruthTable, eliminated_index: number | undefined, regular: boolean): Constraint[] => {
+  const sis = [...tt.state_indices()].filter((si) => si !== eliminated_index)
   const zero_c = regular ? gt : gte
   const cs = sis.map((si) => zero_c(svs([si]), lit(0)))
-  const sum_c = eq(svs(sis), lit(1))
+  const eq_c = eliminated_index === undefined ? eq : regular ? lt : lte
+  const sum_c = eq_c(svs(sis), lit(1))
   cs.push(sum_c)
   return cs
 }
@@ -502,13 +503,18 @@ const letters_in_sentence = (sentence: Sentence, letters: SentenceMap['letter'][
   }
 }
 
-const translate = (constraints: Constraint[]): [VariableLists, TruthTable, Constraint[]] => {
+export const variables_in_constraints = (constraints: Constraint[]): VariableLists => {
   const variables = { real: [] as string[], sentence: [] as SentenceMap['letter'][] }
   for (const c of constraints) {
     letters_in_constraint(c, variables)
   }
+  // gross!
+  variables.real = [...new Set(variables.real)]
+  variables.sentence = [...new Set(variables.sentence)]
+  return variables
+}
 
-  const tt = new TruthTable(variables.sentence)
+export const translate = (tt: TruthTable, constraints: Constraint[]): Constraint[] => {
   const translated: Constraint[] = []
 
   for (const c of constraints) {
@@ -516,8 +522,7 @@ const translate = (constraints: Constraint[]): [VariableLists, TruthTable, Const
     translated.push(td)
   }
 
-  // gross!
-  return [{ real: [...new Set(variables.real)], sentence: [...new Set(variables.sentence)] }, tt, translated]
+  return translated
 }
 
 type StringGens<TagKey extends string, U extends { [T in TagKey]: string }> = {
@@ -783,54 +788,153 @@ const find_div0_conditions_in_constraints = (constraints: Constraint[]): Constra
   return cs
 }
 
-const translate_constraints_to_smtlib = (constraints: Constraint[], regular: boolean): [TruthTable, Constraint[], S[]] => {
-  const [variables, tt, translated] = translate(constraints)
-  const all_constraints: Constraint[] = []
+export const combine_inverse = (svs1: RealExprMap['state_variable_sum'], svs2: RealExprMap['state_variable_sum']): RealExpr => {
+  // Computes svs1 + (1 - svs2)
+  // which equals 1 + sum(svs1 diff svs2) - sum(svs2 diff svs1)
+  const in_svs1 = new Set(svs1.indices)
+  const in_svs2 = new Set(svs2.indices)
+
+  assert(in_svs1.size === svs1.indices.length, 'Some index in svs1 appears more than once!')
+  assert(in_svs2.size === svs2.indices.length, 'Some index in svs2 appears more than once!')
+
+  const svs1_diff_svs2 = svs1.indices.filter((svs1i) => !in_svs2.has(svs1i))
+  const svs2_diff_svs1 = svs2.indices.filter((svs2i) => !in_svs1.has(svs2i))
+
+  // console.log('1 diff 2:', real_expr_to_string(svs(svs1_diff_svs2)))
+  // console.log('2 diff 1:', real_expr_to_string(svs(svs2_diff_svs1)))
+  // console.log()
+
+  if (svs1_diff_svs2.length === 0 && svs2_diff_svs1.length === 0) {
+    return lit(1)
+  } else if (svs2_diff_svs1.length === 0) {
+    return plus(lit(1), svs(svs1_diff_svs2))
+  } else if (svs1_diff_svs2) {
+    return minus(lit(1), svs(svs2_diff_svs1))
+  } else {
+    return plus(lit(1), minus(svs(svs1_diff_svs2), svs(svs2_diff_svs1)))
+  }
+}
+
+export const eliminate_state_variable_index_in_svs = (index: number, inverted_redef: RealExprMap['state_variable_sum'], subject_svs: RealExprMap['state_variable_sum']): RealExpr => {
+  const subject_wo_index = subject_svs.indices.filter((svsi) => svsi !== index)
+  console.log('eliminate_state_variable_index_in_svs')
+  console.log('index:', index)
+  console.log('inverted_redef:', real_expr_to_string(inverted_redef))
+  console.log('subject_svs:', real_expr_to_string(subject_svs))
+  console.log('should return simplified (unless index_in_subject is false):', real_expr_to_string(plus(svs(subject_wo_index), minus(lit(1), inverted_redef))))
+  const index_in_subject = subject_wo_index.length !== subject_svs.indices.length  // If it was removed, it was originally in it.
+
+  const result = index_in_subject
+    ? combine_inverse(svs(subject_wo_index), inverted_redef)
+    : subject_svs
+  
+  console.log('index_in_subject:', index_in_subject)
+  console.log('result:', real_expr_to_string(result))
+  console.log()
+  
+  return result
+}
+
+const eliminate_state_variable_index_in_real_expr = (index: number, inverted_redef: RealExprMap['state_variable_sum'], e: RealExpr): RealExpr => {
+  const sub = (e: RealExpr): RealExpr => eliminate_state_variable_index_in_real_expr(index, inverted_redef, e)
+  if (e.tag === 'divide') {
+    return { tag: 'divide', numerator: sub(e.numerator), denominator: sub(e.denominator) }
+  } else if (e.tag === 'given_probability') {
+    return e
+  } else if (e.tag === 'literal') {
+    return e
+  } else if (e.tag === 'minus') {
+    return { tag: 'minus', left: sub(e.left), right: sub(e.right) }
+  } else if (e.tag === 'multiply') {
+    return { tag: 'multiply', left: sub(e.left), right: sub(e.right) }
+  } else if (e.tag === 'negative') {
+    return { tag: 'negative', expr: sub(e.expr) }
+  } else if (e.tag === 'plus') {
+    return { tag: 'plus', left: sub(e.left), right: sub(e.right) }
+  } else if (e.tag === 'power') {
+    return { tag: 'power', base: sub(e.base), exponent: sub(e.exponent) }
+  } else if (e.tag === 'probability') {
+    return e
+  } else if (e.tag === 'state_variable_sum') {
+    return eliminate_state_variable_index_in_svs(index, inverted_redef, e)
+  } else if (e.tag === 'variable') {
+    return e
+  } else {
+    const check: Equiv<typeof e, never> = true
+    void check
+    throw new Error('eliminate_state_variable_index_in_real_expr fallthrough')
+  }
+}
+
+const eliminate_state_variable_index_in_constraint = (index: number, inverted_redef: RealExprMap['state_variable_sum'], c: Constraint): Constraint => {
+  const sub = (c: Constraint): Constraint => eliminate_state_variable_index_in_constraint(index, inverted_redef, c)
+  const re = (e: RealExpr): RealExpr => eliminate_state_variable_index_in_real_expr(index, inverted_redef, e)
+  if (c.tag === 'biconditional') {
+    return { tag: 'biconditional', left: sub(c.left), right: sub(c.right) }
+  } else if (c.tag === 'conditional') {
+    return { tag: 'conditional', left: sub(c.left), right: sub(c.right) }
+  } else if (c.tag === 'conjunction') {
+    return { tag: 'conjunction', left: sub(c.left), right: sub(c.right) }
+  } else if (c.tag === 'disjunction') {
+    return { tag: 'disjunction', left: sub(c.left), right: sub(c.right) }
+  } else if (c.tag === 'equal') {
+    return { tag: 'equal', left: re(c.left), right: re(c.right) }
+  } else if (c.tag === 'greater_than') {
+    return { tag: 'greater_than', left: re(c.left), right: re(c.right) }
+  } else if (c.tag === 'greater_than_or_equal') {
+    return { tag: 'greater_than_or_equal', left: re(c.left), right: re(c.right) }
+  } else if (c.tag === 'less_than') {
+    return { tag: 'less_than', left: re(c.left), right: re(c.right) }
+  } else if (c.tag === 'less_than_or_equal') {
+    return { tag: 'less_than_or_equal', left: re(c.left), right: re(c.right) }
+  } else if (c.tag === 'negation') {
+    return { tag: 'negation', constraint: sub(c.constraint) }
+  } else if (c.tag === 'not_equal') {
+    return { tag: 'not_equal', left: re(c.left), right: re(c.right) }
+  } else {
+    const check: Equiv<typeof c, never> = true
+    void check
+    throw new Error('eliminate_state_variable_index_in_constraint fallthrough')
+  }
+}
+
+// Returns [redef, new constraints]
+export const eliminate_state_variable_index = (n_states: number, index: number, constraints: Constraint[]): [RealExpr, Constraint[]] => {
+  // a_1, ..., a_i, ..., a_n --> a_1, ..., a_n
+  const inverted_redef = svs(Array(n_states).fill(0).map((_, i) => i).filter((e) => e !== index))
+  const new_constraints = constraints.map((c) => eliminate_state_variable_index_in_constraint(index, inverted_redef, c))
+  return [minus(lit(1), inverted_redef), new_constraints]
+}
+
+// Adds probability and division by zero constraints.
+
+export const enrich_constraints = (tt: TruthTable, index_to_eliminate: number | undefined, regular: boolean, constraints: Constraint[]): Constraint[] => {
+  return [
+    ...probability_constraints(tt, index_to_eliminate, regular),
+    ...find_div0_conditions_in_constraints(constraints),
+    ...constraints,
+  ]
+}
+
+const translate_constraints_to_smtlib = (tt: TruthTable, index_to_eliminate: number, constraints: Constraint[]): S[] => {
   const smtlib_lines: S[] = []
   smtlib_lines.push(['set-logic', 'QF_NRA'])
 
-  // smtlib_lines.push(
-  //   ['declare-fun', 'div', ['Real', 'Real'], 'Real'],
-  //   ['assert',
-  //     ['forall', [['x', 'Real'], ['y', 'Real']],
-  //       ['=>', ['not', ['=', 'y', '0']],
-  //              ['=', ['div', 'x', 'y'], ['/', 'x', 'y']]]]],
-  //   ['assert',
-  //     ['forall', [['x', 'Real'], ['r', 'Real']],
-  //       ['not', ['or', ['<', ['div', 'x', '0'], 'r'],
-  //                      ['=', ['div', 'x', '0'], 'r'],
-  //                      ['<', 'r', ['div', 'x', '0']]]]]],
-  // )
-
-  for (const rv of variables.real) {
+  for (const rv of tt.variables.real) {
     const declaration = ['declare-const', rv, 'Real']
     smtlib_lines.push(declaration)
   }
 
   for (const state_index of tt.state_indices()) {
+    if (state_index === index_to_eliminate) {
+      continue
+    }
     const declaration = ['declare-const', state_index_id(state_index), 'Real']
     smtlib_lines.push(declaration)
   }
 
-  const pcs = probability_constraints(tt, regular)
-  all_constraints.push(...pcs)
-  for (const pc of pcs) {
-    const as_smtlib = constraint_to_smtlib(pc)
-    const assertion = ['assert', as_smtlib]
-    smtlib_lines.push(assertion)
-  }
-
-  const div0_constraints = find_div0_conditions_in_constraints(translated)
-  all_constraints.push(...div0_constraints)
-  for (const div0c of div0_constraints) {
-    const as_smtlib = constraint_to_smtlib(div0c)
-    const assertion = ['assert', as_smtlib]
-    smtlib_lines.push(assertion)
-  }
-
-  all_constraints.push(...translated)
-  for (const tc of translated) {
-    const as_smtlib = constraint_to_smtlib(tc)
+  for (const c of constraints) {
+    const as_smtlib = constraint_to_smtlib(c)
     const assertion = ['assert', as_smtlib]
     smtlib_lines.push(assertion)
   }
@@ -838,7 +942,7 @@ const translate_constraints_to_smtlib = (constraints: Constraint[], regular: boo
   smtlib_lines.push(['check-sat'])
   smtlib_lines.push(['get-model'])
 
-  return [tt, all_constraints, smtlib_lines]
+  return smtlib_lines
 }
 
 /*
@@ -887,7 +991,8 @@ const s_to_string = (s: S): string => {
 }
 
 import P from 'parsimmon'
-import { PrSat, SentenceMap } from "./types"
+import { PrSat, RealExprMap, SentenceMap } from "./types"
+import { Equiv } from "./tag_map"
 
 const s_lang = P.createLanguage({
   s: (r) => P.alt(r.list, r.atom),
@@ -920,9 +1025,9 @@ export const parse_s = (str: string): S => {
   return s_lang.s.tryParse(str)
 }
 
-export const constraints_to_smtlib_string = (constraints: Constraint[], regular: boolean = false): [TruthTable, Constraint[], string] => {
-  const [tt, all_constraints, smtlib_lines] = translate_constraints_to_smtlib(constraints, regular)
-  return [tt, all_constraints, smtlib_lines.map(s_to_string).join('\n')]
+export const constraints_to_smtlib_string = (tt: TruthTable, index_to_eliminate: number, constraints: Constraint[]): string => {
+  const smtlib_lines = translate_constraints_to_smtlib(tt, index_to_eliminate, constraints)
+  return smtlib_lines.map(s_to_string).join('\n')
 }
 
 export const translate_constraint = (tt: TruthTable, constraint: Constraint): Constraint => {
@@ -1059,8 +1164,12 @@ export const translate_real_expr = (tt: TruthTable, expr: RealExpr): RealExpr =>
     const tb = translate_real_expr(tt, expr.base)
     const te = translate_real_expr(tt, expr.exponent)
     return { tag: 'power', base: tb, exponent: te }
+  } else if (expr.tag === 'state_variable_sum') {
+    return expr
   } else {
-    throw new Error('translate_real_expr fallthrough')
+    const check: Equiv<typeof expr, never> = true
+    void check
+    throw new Error(`translate_real_expr fallthrough: ${JSON.stringify(expr)}`)
   }
 }
 

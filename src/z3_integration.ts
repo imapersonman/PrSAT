@@ -1,8 +1,9 @@
 import { Context, init, Model, Z3HighLevel, Z3LowLevel } from "z3-solver"
 import { match_s, S, spv, clause } from "./s"
-import { constraint_to_string, constraints_to_smtlib_string, parse_s, TruthTable } from "./pr_sat"
+import { constraint_to_string, constraints_to_smtlib_string, eliminate_state_variable_index, enrich_constraints, parse_s, translate, TruthTable, variables_in_constraints } from "./pr_sat"
 // import { Res } from "../utils"
 import { PrSat } from "./types"
+import { assert_exists } from "./utils"
 
 type RealExpr = PrSat['RealExpr']
 type Constraint = PrSat['Constraint']
@@ -72,7 +73,7 @@ const parse_and_evaluate = (s: S): number => {
   ])
 }
 
-const model_to_state_value_array = async <CtxKey extends string>(ctx: Context<CtxKey>, model: Model<CtxKey>): Promise<number[]> => {
+const model_to_state_values = async <CtxKey extends string>(ctx: Context<CtxKey>, model: Model<CtxKey>): Promise<Record<number, number>> => {
   const values_map: Record<number, number> = {}
   const { simplify } = ctx
   for (const decl of model.decls()) {
@@ -105,37 +106,39 @@ const model_to_state_value_array = async <CtxKey extends string>(ctx: Context<Ct
 
 const tolerance = 0.00000000000001
 
-const evaluate_constraint = (state_value_array: number[], constraint: Constraint): boolean => {
+// state_values: Record<StateIndex, Value>
+const evaluate_constraint = (state_values: Record<number, number>, constraint: Constraint): boolean => {
   if (constraint.tag === 'equal') {
     // return evaluate_real_expr(state_value_array, constraint.left) === evaluate_real_expr(state_value_array, constraint.right)
-    return Math.abs(evaluate_real_expr(state_value_array, constraint.left) - evaluate_real_expr(state_value_array, constraint.right)) <= tolerance
+    return Math.abs(evaluate_real_expr(state_values, constraint.left) - evaluate_real_expr(state_values, constraint.right)) <= tolerance
   } else if (constraint.tag === 'not_equal') {
     // return evaluate_real_expr(state_value_array, constraint.left) !== evaluate_real_expr(state_value_array, constraint.right)
-    return Math.abs(evaluate_real_expr(state_value_array, constraint.left) - evaluate_real_expr(state_value_array, constraint.right)) > tolerance
+    return Math.abs(evaluate_real_expr(state_values, constraint.left) - evaluate_real_expr(state_values, constraint.right)) > tolerance
   } else if (constraint.tag === 'less_than') {
-    return evaluate_real_expr(state_value_array, constraint.left) < evaluate_real_expr(state_value_array, constraint.right)
+    return evaluate_real_expr(state_values, constraint.left) < evaluate_real_expr(state_values, constraint.right)
   } else if (constraint.tag === 'less_than_or_equal') {
-    return evaluate_real_expr(state_value_array, constraint.left) <= evaluate_real_expr(state_value_array, constraint.right)
+    return evaluate_real_expr(state_values, constraint.left) <= evaluate_real_expr(state_values, constraint.right)
   } else if (constraint.tag === 'greater_than') {
-    return evaluate_real_expr(state_value_array, constraint.left) > evaluate_real_expr(state_value_array, constraint.right)
+    return evaluate_real_expr(state_values, constraint.left) > evaluate_real_expr(state_values, constraint.right)
   } else if (constraint.tag === 'greater_than_or_equal') {
-    return evaluate_real_expr(state_value_array, constraint.left) >= evaluate_real_expr(state_value_array, constraint.right)
+    return evaluate_real_expr(state_values, constraint.left) >= evaluate_real_expr(state_values, constraint.right)
   } else if (constraint.tag === 'negation') {
-    return !evaluate_constraint(state_value_array, constraint.constraint)
+    return !evaluate_constraint(state_values, constraint.constraint)
   } else if (constraint.tag === 'conjunction') {
-    return evaluate_constraint(state_value_array, constraint.left) && evaluate_constraint(state_value_array, constraint.right)
+    return evaluate_constraint(state_values, constraint.left) && evaluate_constraint(state_values, constraint.right)
   } else if (constraint.tag === 'disjunction') {
-    return evaluate_constraint(state_value_array, constraint.left) || evaluate_constraint(state_value_array, constraint.right)
+    return evaluate_constraint(state_values, constraint.left) || evaluate_constraint(state_values, constraint.right)
   } else if (constraint.tag === 'conditional') {
-    return !evaluate_constraint(state_value_array, constraint.left) || evaluate_constraint(state_value_array, constraint.right)
+    return !evaluate_constraint(state_values, constraint.left) || evaluate_constraint(state_values, constraint.right)
   } else if (constraint.tag === 'biconditional') {
-    return evaluate_constraint(state_value_array, constraint.left) === evaluate_constraint(state_value_array, constraint.right)
+    return evaluate_constraint(state_values, constraint.left) === evaluate_constraint(state_values, constraint.right)
   } else {
     throw new Error('evaluate_constraint fallthrough')
   }
 }
 
-const evaluate_real_expr = (state_value_array: number[], expr: RealExpr): number => {
+// state_values: Record<StateIndex, Value>
+const evaluate_real_expr = (state_values: Record<number, number>, expr: RealExpr): number => {
   if (expr.tag === 'literal') {
     return expr.value
   } else if (expr.tag === 'variable') {
@@ -143,55 +146,66 @@ const evaluate_real_expr = (state_value_array: number[], expr: RealExpr): number
   } else if (expr.tag === 'probability' || expr.tag === 'given_probability') {
     throw new Error('not evaluating probabilities yet!')
   } else if (expr.tag === 'state_variable_sum') {
-    return expr.indices.map((i) => state_value_array[i]).reduce((a, b) => a + b, 0)
+    return expr.indices.map((i) => assert_exists(state_values[i])).reduce((a, b) => a + b, 0)
   } else if (expr.tag === 'negative') {
-    return -evaluate_real_expr(state_value_array, expr.expr)
+    return -evaluate_real_expr(state_values, expr.expr)
   } else if (expr.tag === 'power') {
-    return Math.pow(evaluate_real_expr(state_value_array, expr.base), evaluate_real_expr(state_value_array, expr.exponent))
+    return Math.pow(evaluate_real_expr(state_values, expr.base), evaluate_real_expr(state_values, expr.exponent))
   } else if (expr.tag === 'plus') {
-    return evaluate_real_expr(state_value_array, expr.left) + evaluate_real_expr(state_value_array, expr.right)
+    return evaluate_real_expr(state_values, expr.left) + evaluate_real_expr(state_values, expr.right)
   } else if (expr.tag === 'minus') {
-    return evaluate_real_expr(state_value_array, expr.left) - evaluate_real_expr(state_value_array, expr.right)
+    return evaluate_real_expr(state_values, expr.left) - evaluate_real_expr(state_values, expr.right)
   } else if (expr.tag === 'multiply') {
-    return evaluate_real_expr(state_value_array, expr.left) * evaluate_real_expr(state_value_array, expr.right)
+    return evaluate_real_expr(state_values, expr.left) * evaluate_real_expr(state_values, expr.right)
   } else if (expr.tag === 'divide') {
-    return evaluate_real_expr(state_value_array, expr.numerator) / evaluate_real_expr(state_value_array, expr.denominator)
+    return evaluate_real_expr(state_values, expr.numerator) / evaluate_real_expr(state_values, expr.denominator)
   } else {
     throw new Error('evaluate_real_expr fallthrough')
   }
 }
 
-const validate_model = async <CtxKey extends string>(constraints: Constraint[], ctx: Context<CtxKey>, model: Model<CtxKey>): Promise<[number[], boolean[]]> => {
-  const state_value_array = await model_to_state_value_array(ctx, model)
-  return [state_value_array, constraints.map((c) => evaluate_constraint(state_value_array, c))]
+const validate_model = async (constraints: Constraint[], state_values: Record<number, number>): Promise<boolean[]> => {
+  return constraints.map((c) => evaluate_constraint(state_values, c))
 }
 
 export const pr_sat = async <CtxKey extends string>(
   ctx: Context<CtxKey>,
   constraints: Constraint[],
   regular: boolean = false,
-// ): Promise<Res<[TruthTable, Model<CtxKey>], {}>> => {
 ): Promise<{ status: 'sat', all_constraints: Constraint[], tt: TruthTable, model: Model<CtxKey> } | { status: 'unsat' | 'unknown', all_constraints: Constraint[], tt: TruthTable, model: undefined }> => {
   const { Solver } = ctx
   const solver = new Solver();
 
-  const [tt, all_constraints, smtlib_string] = constraints_to_smtlib_string(constraints, regular)
+  const variables = variables_in_constraints(constraints)
+  const tt = new TruthTable(variables)
+  const translated = translate(tt, constraints)
+  const index_to_eliminate = tt.n_states() - 1
+  const enriched_constraints = enrich_constraints(tt, index_to_eliminate, regular, translated)
+  const [state_index_redef, elim_constraints] = eliminate_state_variable_index(tt.n_states(), index_to_eliminate, enriched_constraints)
+  console.log('translated', elim_constraints.map(constraint_to_string))
+
+  const smtlib_string = constraints_to_smtlib_string(tt, index_to_eliminate, elim_constraints)
+  console.log(smtlib_string)
   solver.fromString(smtlib_string)
   const result = await solver.check()
 
   if (result === 'sat') {
     const model = solver.model();
-    const [state_value_array, validation] = await validate_model(all_constraints, ctx, model)
+    const other_state_values = await model_to_state_values(ctx, model)
+    const state_values = {
+      ...other_state_values,
+      [index_to_eliminate]: evaluate_real_expr(other_state_values, state_index_redef),
+    }
+    const validation = await validate_model(translated, state_values)
     if (!validation.every((v) => v)) {
       console.log(validation)
-      console.log(state_value_array)
-      console.log(all_constraints.map(constraint_to_string))
+      console.log(state_values)
+      console.log(translated.map(constraint_to_string))
       throw new Error('Constraints found to be satisfiable but the internal check for satisfiability given the model failed!')
     }
-    // return [true, [tt, model]]
-    return { status: 'sat', all_constraints, tt, model }
+    return { status: 'sat', all_constraints: translated, tt, model }
   } else {
-    return { status: result, all_constraints, tt, model: undefined }
+    return { status: result, all_constraints: translated, tt, model: undefined }
   }
 }
 

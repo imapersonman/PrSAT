@@ -22,6 +22,7 @@ type RealExpr =
   | { tag: 'multiply', left: RealExpr, right: RealExpr }
   | { tag: 'divide', numerator: RealExpr, denominator: RealExpr }
   | { tag: 'power', base: RealExpr, exponent: RealExpr }
+export type RealExprMap = UnionToTagMap<'tag', RealExpr>
 
 type Constraint =
   | { tag: 'equal', left: RealExpr, right: RealExpr }

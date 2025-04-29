@@ -38,7 +38,7 @@ describe('z3', () => {
   })
   test('titelbaum 2.10', async () => {
     const { Context } = await init_z3()
-    const { status: sat, model: _ } = await pr_sat(Context('main'), [
+    const { status: sat } = await pr_sat(Context('main'), [
       eq(pr(imp(A, iff(B, C))), lit(1)),
       eq(pr(B), pr(not(B))),
       eq(pr(C), multiply(lit(2), pr(and(C, A)))),
@@ -48,14 +48,14 @@ describe('z3', () => {
   })
   test('Pr(~X) = 1 - Pr(X)', async () => {
     const { Context } = await init_z3()
-    const { status: sat, model: _ } = await pr_sat(Context('main'), [
+    const { status: sat } = await pr_sat(Context('main'), [
       cnot(eq(pr(not(A)), minus(lit(1), pr(A)))),
     ])
     expect(sat).toEqual('unsat')
   })
   test('total probability', async () => {
     const { Context } = await init_z3()
-    const { status: sat, model: _ } = await pr_sat(Context('main'), [
+    const { status: sat } = await pr_sat(Context('main'), [
       cnot(eq(pr(A), plus(multiply(cpr(A, B), pr(B)), multiply(cpr(A, not(B)), pr(not(B)))))),
     ])
     expect(sat).toEqual('unsat')
@@ -411,7 +411,7 @@ describe('z3', () => {
         const { status: sat, model: _ } = await pr_sat(Context('main'), constraints)
         expect(sat).toEqual('unsat')
       })
-      test.skip('i', async () => {
+      test('i', async () => {
         const { Context } = await init_z3()
         const constraints = desideratum(ik)
         const { status: sat, model: _ } = await pr_sat(Context('main'), constraints)
