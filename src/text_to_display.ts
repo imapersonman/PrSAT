@@ -1,12 +1,12 @@
-import { Context, Model } from "z3-solver";
+import { Context } from "z3-solver";
 import { Editable, EditableDLL, rEditable, WatchGroup } from './editable';
 import { el, math_el } from "./el";
-import { assert, assert_exists, assert_result, NumericKeys, Res } from "./utils";
+import { assert, assert_exists, NumericKeys, Res } from "./utils";
 import { debounce } from "./debounce";
 import { parse_constraint } from "./parser";
-import { constraint_to_string, parse_s, possible_constraint_connectives, possible_sentence_connectives, TruthTable } from "./pr_sat";
-import { init_z3, pr_sat } from "./z3_integration";
-import { match_s, S, spv, clause, s_to_string } from "./s";
+import { constraint_to_string, possible_constraint_connectives, possible_sentence_connectives, TruthTable } from "./pr_sat";
+import { init_z3, ModelAssignmentOutput, pr_sat } from "./z3_integration";
+import { s_to_string } from "./s";
 
 import './style.css'
 import { PrSat, SentenceMap } from "./types";
@@ -508,134 +508,6 @@ const batch_input = (): MultiInput => {
   return { element, all_constraints }
 }
 
-type ModelAssignmentOutput =
-  | { tag: 'literal', value: number }
-  | { tag: 'negative', inner: ModelAssignmentOutput }
-  | { tag: 'rational', numerator: ModelAssignmentOutput, denominator: ModelAssignmentOutput }
-  | { tag: 'root-obj', index: number, a: ModelAssignmentOutput, b: ModelAssignmentOutput, c: ModelAssignmentOutput}
-  | { tag: 'unknown', s: S }
-
-// // Should be *mostly* simplified, but still might run into issues so this function is here just in case.
-// const simplify_model_assignment_output = (output: ModelAssignmentOutput): ModelAssignmentOutput => {
-//   throw new Error('unimplemented')
-// }
-
-const parse_int = (a: string): Res<number, string> => {
-  const as_int = parseInt (a)
-  if (isNaN(as_int)) {
-    return [false, `Parsing '${a}' as int gave a NaN!`]
-  } else {
-    return [true, as_int]
-  }
-}
-
-const parse_float = (a: string): Res<number, string> => {
-  const as_float = parseFloat(a)
-  if (isNaN(as_float)) {
-    return [false, `Parsing '${a}' as float gave a NaN!`]
-  } else {
-    return [true, as_float]
-  }
-}
-
-const parse_and_evaluate = (s: S): number => {
-  const [a, b, c, d] = [spv('a'), spv('b'), spv('c'), spv('d')]
-  return match_s(s, [
-    clause<{ a: 'string' }, number>({ a: 'string' }, a, (m) => {
-      return assert_result(parse_float(m('a')))
-    }),
-    clause<{ a: 'string' }, number>({ a: 'string' }, ['-', a], (m) => {
-      return -parse_and_evaluate(m('a'))
-    }),
-    clause<{ a: 'string', b: 'string' }, number>({ a: 'string', b: 'string' }, ['/', a, b], (m) => {
-      return parse_and_evaluate(m('a')) / parse_and_evaluate(m('b'))
-    }),
-    // expect(parse_s('(root-obj (+ (* 8 (^ x 2)) (* 6 x) (- 1)) 2)'))
-    clause<{ a: 's', b: 's', c: 's', d: 'string' }, number>(
-      { a: 's', b: 's', c: 's', d: 'string' },
-      ['root-obj', ['+', ['*', a], ['*', b], c], d],
-      (m) => {
-        const af = parse_and_evaluate(m('a'))
-        const bf = parse_and_evaluate(m('b'))
-        const cf = parse_and_evaluate(m('c'))
-        const di = assert_result(parse_int(m('d')))
-
-        // (-b +- sqrt(b^2 - 4ac)) / 2a
-        const det = bf * bf - 4 * af * cf
-        if (det < 0) {
-          throw new Error('Evaluated value to complex number oops!')
-        } else if (di === 1) {
-          return (-bf - Math.sqrt(det)) / (2 * af)
-        } else if (di === 2) {
-          return (-bf + Math.sqrt(det)) / (2 * af)
-        } else {
-          throw new Error(`Unrecognized root index ${di}!`)
-        }
-      }),
-  ])
-}
-
-const parse_to_assignment = (s: S): ModelAssignmentOutput => {
-  const [a, b, c, d] = [spv('a'), spv('b'), spv('c'), spv('d')]
-  return match_s(s, [
-    clause<{ a: 'string' }, ModelAssignmentOutput>({ a: 'string' }, a, (m) => {
-      const value = assert_result(parse_float(m('a')))
-      return { tag: 'literal', value }
-    }),
-    clause<{ a: 'string' }, ModelAssignmentOutput>({ a: 'string' }, ['-', a], (m) => {
-      const inner = parse_to_assignment(m('a'))
-      return { tag: 'negative', inner }
-    }),
-    clause<{ a: 'string', b: 'string' }, ModelAssignmentOutput>({ a: 'string', b: 'string' }, ['/', a, b], (m) => {
-      const numerator = parse_to_assignment(m('a'))
-      const denominator = parse_to_assignment(m('b'))
-      return { tag: 'rational', numerator, denominator }
-    }),
-    clause<{ a: 's', b: 's', c: 's', d: 'string' }, ModelAssignmentOutput>(
-      { a: 's', b: 's', c: 's', d: 'string' },
-      ['root-obj', ['+', ['*', a], ['*', b], c], d],
-      (m) => {
-        const af = parse_to_assignment(m('a'))
-        const bf = parse_to_assignment(m('b'))
-        const cf = parse_to_assignment(m('c'))
-        const di = assert_result(parse_int(m('d')))
-
-        return { tag: 'root-obj', index: di, a: af, b: bf, c: cf }
-      }),
-  ])
-}
-
-const model_to_assignments = async <CtxKey extends string>(ctx: Context<CtxKey>, model: Model<CtxKey>): Promise<ModelAssignmentOutput[]> => {
-  const assignments_map: Record<number, ModelAssignmentOutput> = {}
-  const { simplify } = ctx
-  for (const decl of model.decls()) {
-    if (decl.arity() !== 0) {
-      // throw new Error(`model includes a function declaration with arity not equal to zero!\nname: ${decl.name()}`)
-      continue
-    }
-    const name = decl.name().toString()
-    if (name.length < 3) {
-      throw new Error(`Expected model entry name to be of length at least 3!\nname: ${name.length}`)
-    }
-    const index_str = name.substring(2)
-    const index = parseInt(index_str)
-    if (isNaN(index)) {
-      throw new Error(`Expected model entry name to be of the form s_<number>!\nname: ${name}`)
-    }
-
-    const value_expr = await simplify(model.eval(decl.call()))
-    const parsed_s = parse_s(value_expr.sexpr())
-    const value = parse_to_assignment(parsed_s)
-    assignments_map[index] = value
-  }
-
-  const values: ModelAssignmentOutput[] = []
-  for (let i = 0; i < Object.keys(assignments_map).length; i++) {
-    values.push(assignments_map[i])
-  }
-  return values
-}
-
 const model_assignment_display = (ma: ModelAssignmentOutput): Node => {
   const wrap = (ma: ModelAssignmentOutput): Node => {
     if (ma.tag === 'negative') {
@@ -681,12 +553,12 @@ const state_id = (index: number | string): MathMLElement => {
   return math_el('msub', {}, math_el('mi', {}, 'a'), math_el('mi', {}, i.toString()))
 }
 
-const model_display = async <CtxKey extends string>(ctx: Context<CtxKey>, model: [TruthTable, Model<CtxKey>]): Promise<HTMLElement> => {
+const model_display = async (model: [TruthTable, Record<number, ModelAssignmentOutput>]): Promise<HTMLElement> => {
   // One column per sentence-letter
   // Header has the form "A1 | A2 | ... | An | a_i | Assignment"
 
-  const [tt, z3_model] = model
-  const model_assignments = await model_to_assignments(ctx, z3_model)
+  const [tt, model_assignments] = model
+  // const model_assignments = await model_to_assignments(ctx, z3_model)
   const body = el('tbody', {})
   const head_row = el('tr', {})
   const head = el('thead', {}, head_row)
@@ -698,13 +570,11 @@ const model_display = async <CtxKey extends string>(ctx: Context<CtxKey>, model:
   head_row.appendChild(el('th', { class: 'dv' }))
   head_row.appendChild(el('th', {}, 'Assignment'))
 
-  for (const [index, ma] of model_assignments.entries()) {  // rows
-    // const state = tt.state_from_index(index)
-    // const state_string = sentence_to_string(state)
+  for (const [index, ma] of Object.entries(model_assignments)) {  // rows
     const assignment_html = model_assignment_display(ma)
     const row = el('tr', {})
     for (const l of tt.letters()) {
-      const letter_value = tt.letter_value_from_index(l, index)
+      const letter_value = tt.letter_value_from_index(l, parseInt(index))  // Scary parseInt!
       const value_string = letter_value ? '⊤' : '⊥'
       row.appendChild(el('td', {}, value_string))
     }
@@ -840,7 +710,7 @@ const main = (): HTMLElement => {
         const { status, all_constraints, tt, model } = await pr_sat(ctx, constraints, is_regular.get())
         if (status === 'sat') {
           console.log('sat!')
-          const model_html = await model_display(ctx, [tt, model])
+          const model_html = await model_display([tt, model])
           model_container.appendChild(model_html)
         } else {
           console.log(status)

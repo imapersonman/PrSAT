@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'vitest'
-import { Model } from 'z3-solver'
 import { constraint_builder, parse_s, real_expr_builder, sentence_builder } from './pr_sat'
-import { init_z3, pr_sat } from './z3_integration'
+import { init_z3, model_assignment_output_to_string, ModelAssignmentOutput, pr_sat } from './z3_integration'
 import { PrSat } from './types'
 import { S, s_to_string } from './s'
 
@@ -9,10 +8,9 @@ type Sentence = PrSat['Sentence']
 type RealExpr = PrSat['RealExpr']
 type Constraint = PrSat['Constraint']
 
-const zero_arity_model_to_string = <CtxKey extends string>(model: Model<CtxKey>): string => {
-  return model.decls()
-    .filter((d) => d.arity() === 0)
-    .map((d) => `${d.name()} = ${model.eval(d.call())}`)
+const zero_arity_model_to_string = (model: Record<number, ModelAssignmentOutput>): string => {
+  return Object.entries(model)
+    .map(([name, assignment]) => `${name} = ${model_assignment_output_to_string(assignment)}`)
     .join('\n')
 }
 

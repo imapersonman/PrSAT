@@ -7,7 +7,7 @@ export default defineConfig({
       enabled: false,
       name: 'chromium', // browser name is required
     },
-    testTimeout: 1_200_000,
+    testTimeout: 60_000,
   },
   build: {
     sourcemap: true,

@@ -715,9 +715,9 @@ export const sentence_to_random_string = (random: Random, s: Sentence): string =
   })
 }
 
-type S =
-  | string
-  | S[]
+// type S =
+//   | string
+//   | S[]
 
 const div0_conditions_in_single_constraint = (c: Constraint): Constraint[] => {
   if (c.tag === 'equal') {
@@ -893,7 +893,7 @@ export const eliminate_state_variable_index = (n_states: number, index: number, 
   const redef = minus(lit(1), inverted_redef)
   const final_constraints = [
     ...new_constraints,
-    eq(svs([index]), redef),
+    // eq(svs([index]), redef),
   ]
   return [redef, final_constraints]
 }
@@ -971,17 +971,18 @@ const translate_constraints_to_smtlib = (tt: TruthTable, constraints: Constraint
 (get-model)
 */
 
-const s_to_string = (s: S): string => {
-  if (typeof s === 'string') {
-    return s
-  } else {
-    return `(${s.map(s_to_string).join(' ')})`
-  }
-}
+// const s_to_string = (s: S): string => {
+//   if (typeof s === 'string') {
+//     return s
+//   } else {
+//     return `(${s.map(s_to_string).join(' ')})`
+//   }
+// }
 
 import P from 'parsimmon'
 import { PrSat, RealExprMap, SentenceMap } from "./types"
 import { Equiv } from "./tag_map"
+import { S, s_to_string } from "./s"
 
 const s_lang = P.createLanguage({
   s: (r) => P.alt(r.list, r.atom),
@@ -1016,7 +1017,7 @@ export const parse_s = (str: string): S => {
 
 export const constraints_to_smtlib_string = (tt: TruthTable, constraints: Constraint[]): string => {
   const smtlib_lines = translate_constraints_to_smtlib(tt, constraints)
-  return smtlib_lines.map(s_to_string).join('\n')
+  return smtlib_lines.map((s) => s_to_string(s, false)).join('\n')
 }
 
 export const translate_constraint = (tt: TruthTable, constraint: Constraint): Constraint => {
