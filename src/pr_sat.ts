@@ -890,7 +890,12 @@ export const eliminate_state_variable_index = (n_states: number, index: number, 
   // a_1, ..., a_i, ..., a_n --> a_1, ..., a_n
   const inverted_redef = svs(Array(n_states).fill(0).map((_, i) => i).filter((e) => e !== index))
   const new_constraints = constraints.map((c) => eliminate_state_variable_index_in_constraint(index, inverted_redef, c))
-  return [minus(lit(1), inverted_redef), new_constraints]
+  const redef = minus(lit(1), inverted_redef)
+  const final_constraints = [
+    ...new_constraints,
+    eq(svs([index]), redef),
+  ]
+  return [redef, final_constraints]
 }
 
 // Adds probability and division by zero constraints.
@@ -903,7 +908,7 @@ export const enrich_constraints = (tt: TruthTable, index_to_eliminate: number | 
   ]
 }
 
-const translate_constraints_to_smtlib = (tt: TruthTable, index_to_eliminate: number, constraints: Constraint[]): S[] => {
+const translate_constraints_to_smtlib = (tt: TruthTable, constraints: Constraint[]): S[] => {
   const smtlib_lines: S[] = []
   smtlib_lines.push(['set-logic', 'QF_NRA'])
 
@@ -913,9 +918,6 @@ const translate_constraints_to_smtlib = (tt: TruthTable, index_to_eliminate: num
   }
 
   for (const state_index of tt.state_indices()) {
-    if (state_index === index_to_eliminate) {
-      continue
-    }
     const declaration = ['declare-const', state_index_id(state_index), 'Real']
     smtlib_lines.push(declaration)
   }
@@ -1012,8 +1014,8 @@ export const parse_s = (str: string): S => {
   return s_lang.s.tryParse(str)
 }
 
-export const constraints_to_smtlib_string = (tt: TruthTable, index_to_eliminate: number, constraints: Constraint[]): string => {
-  const smtlib_lines = translate_constraints_to_smtlib(tt, index_to_eliminate, constraints)
+export const constraints_to_smtlib_string = (tt: TruthTable, constraints: Constraint[]): string => {
+  const smtlib_lines = translate_constraints_to_smtlib(tt, constraints)
   return smtlib_lines.map(s_to_string).join('\n')
 }
 

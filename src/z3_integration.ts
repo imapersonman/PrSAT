@@ -181,19 +181,15 @@ export const pr_sat = async <CtxKey extends string>(
   const translated = translate(tt, constraints)
   const index_to_eliminate = tt.n_states() - 1
   const enriched_constraints = enrich_constraints(tt, index_to_eliminate, regular, translated)
-  const [state_index_redef, elim_constraints] = eliminate_state_variable_index(tt.n_states(), index_to_eliminate, enriched_constraints)
+  const [, elim_constraints] = eliminate_state_variable_index(tt.n_states(), index_to_eliminate, enriched_constraints)
 
-  const smtlib_string = constraints_to_smtlib_string(tt, index_to_eliminate, elim_constraints)
+  const smtlib_string = constraints_to_smtlib_string(tt, elim_constraints)
   solver.fromString(smtlib_string)
   const result = await solver.check()
 
   if (result === 'sat') {
     const model = solver.model();
-    const other_state_values = await model_to_state_values(ctx, model)
-    const state_values = {
-      ...other_state_values,
-      [index_to_eliminate]: evaluate_real_expr(other_state_values, state_index_redef),
-    }
+    const state_values = await model_to_state_values(ctx, model)
     const validation = await validate_model(translated, state_values)
     if (!validation.every((v) => v)) {
       console.log(validation)
