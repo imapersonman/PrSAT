@@ -1,7 +1,7 @@
 import { Context, Model } from "z3-solver";
 import { Editable, EditableDLL, rEditable, WatchGroup } from './editable';
 import { el, math_el } from "./el";
-import { assert, assert_exists, assert_result, Res } from "./utils";
+import { assert, assert_exists, assert_result, NumericKeys, Res } from "./utils";
 import { debounce } from "./debounce";
 import { parse_constraint } from "./parser";
 import { constraint_to_string, parse_s, possible_constraint_connectives, possible_sentence_connectives, TruthTable } from "./pr_sat";
@@ -385,9 +385,9 @@ const multi_input = (): MultiInput => {
   const children = new EditableDLL<SingleInput>([])
   const [all_are_ready, callbacks] = single_input_callbacks_after(children)
   const first = single_input(CONSTRAINT_INPUT_PLACEHOLDER, callbacks)
+  const all_constraints = new Editable<Constraint[] | undefined>(undefined)
   children.insert_after(undefined, first)
 
-  const all_constraints = new Editable<Constraint[] | undefined>(undefined)
   const parent = el('div', { class: 'multi-input' })
 
   children.watch_insert((to_insert, lead_sibling) => {
@@ -423,6 +423,89 @@ const multi_input = (): MultiInput => {
   })
 
   return { element: parent, all_constraints }
+}
+
+const update_constraints_view = (view: HTMLElement, parsed_lines: Res<Constraint, string>[]): void => {
+  view.innerHTML = ''
+  for (const [status, constraint] of parsed_lines) {
+    if (status) {
+      const constraint_view = constraint_to_html(constraint)
+      view.appendChild(el('div', {}, constraint_view))
+    } else {
+      const error_view = el('span', { class: 'error' }, 'Error!')
+      view.appendChild(el('div', {}, error_view))
+    }
+  }
+}
+
+const batch_input = (): MultiInput => {
+  const PARSE_BUTTON_EMPTY = 'Nothing to parse'  // in_sync = true, contains_error = false
+  const PARSE_BUTTON_ERROR = 'Fix error before reparsing!'  // contains_error = true
+  const PARSE_BUTTON_OUT_OF_SYNC = 'Parse'  // in_sync = false
+  const PARSE_BUTTON_IN_SYNC = 'Up to date!'
+
+  const in_sync = new Editable(false)
+  const contains_error = new Editable(false)
+
+  const parse_button = el('input', { type: 'button', value: '', class: 'button', style: 'margin-top: 0.4em;' }) as HTMLButtonElement
+  const textbox = el('textarea', { style: 'display: block;', rows: '10', cols: '50' }) as HTMLTextAreaElement
+  const constraints_view = el('div', { style: 'margin-top: 0.4em;' })
+  const all_constraints = new Editable<Constraint[] | undefined>(undefined)
+
+  const set_state = (in_sync: boolean, contains_error: boolean): void => {
+    parse_button.disabled = textbox.value === '' || in_sync
+    console.log('textbox.value:', textbox.value)
+    if (textbox.value === '') {
+      parse_button.value = PARSE_BUTTON_EMPTY
+    } else if (in_sync && contains_error) {
+      parse_button.value = PARSE_BUTTON_ERROR
+    } else if (in_sync && !contains_error) {
+      parse_button.value = PARSE_BUTTON_IN_SYNC
+    } else if (!in_sync && contains_error) {
+      parse_button.value = PARSE_BUTTON_ERROR
+    } else if (!in_sync && !contains_error) {
+      parse_button.value = PARSE_BUTTON_OUT_OF_SYNC
+    }
+  }
+
+  in_sync.watch((in_sync) => set_state(in_sync, contains_error.get()))
+  contains_error.watch((contains_error) => set_state(in_sync.get(), contains_error)).call()
+
+  textbox.addEventListener('input', () => {
+    in_sync.set(false)
+  })
+
+  parse_button.onclick = () => {
+    const textbox_value = textbox.value.trim()
+    if (textbox_value === '') {
+      return
+    }
+
+    const lines = textbox_value.split('\n')
+    const parsed_lines = lines.map(parse_constraint)
+    const good_lines: Constraint[] = []
+
+    for (const [status, constraint] of parsed_lines) {
+      if (status) {
+        good_lines.push(constraint)
+      }
+    }
+
+    if (good_lines.length === parsed_lines.length) {
+      // No bad lines let's go!
+      all_constraints.set(good_lines)
+      contains_error.set(false)
+    } else {
+      all_constraints.set(undefined)
+      contains_error.set(true)
+    }
+
+    update_constraints_view(constraints_view, parsed_lines)
+    in_sync.set(true)
+  }
+
+  const element = el('div', { class: 'common-element batch-input' }, textbox, parse_button, constraints_view)
+  return { element, all_constraints }
 }
 
 type ModelAssignmentOutput =
@@ -637,29 +720,78 @@ const model_display = async <CtxKey extends string>(ctx: Context<CtxKey>, model:
   return e
 }
 
+const simple_options_display = <const Options extends string[]>(options: Options, def: Options[NumericKeys<Options>]): { element: HTMLElement, options: Editable<Options[NumericKeys<Options>]> } => {
+  const element = el('div', {})
+  const opts = new Editable<Options[NumericKeys<Options>]>(def)
+  const options_map = new Map<Options[keyof Options], { element: HTMLButtonElement }>()
+
+  for (const o of options) {
+    const oe = el('input', { type: 'button', value: o, class: 'button' }, o) as HTMLButtonElement
+    options_map.set(o as any, { element: oe })
+    element.appendChild(oe)
+
+    oe.onclick = () => {
+      opts.set(o as any)
+    }
+  }
+
+  opts.watch((o) => {
+    for (const [other_o, { element: other_element }] of options_map.entries()) {
+      other_element.disabled = o === other_o
+    }
+  }).call()
+
+  return { element, options: opts }
+}
+
 type Z3ContextState =
   | { tag: 'loading' }
   | { tag: 'ready', ctx: Context }
   | { tag: 'error', message: string }
 
 const main = (): HTMLElement => {
-  const mi = multi_input()
+  const DEFAULT_MULTI_INPUT_ID = 'Multi'
+  const display_picker = simple_options_display(['Multi', 'Batch'], DEFAULT_MULTI_INPUT_ID)
+  display_picker.element.style.marginBottom = '0.4em'
+  const input_elements_map = {
+    'Multi': multi_input(),
+    'Batch': batch_input(),
+  } as const
+  let current_mi = input_elements_map[DEFAULT_MULTI_INPUT_ID]
+
   const is_regular = new Editable(false)
   const z3_state = new Editable<Z3ContextState>({ tag: 'loading' })
   const generate_button = el('input', { type: 'button', value: 'Generate', class: 'generate' }) as HTMLButtonElement
   const options_button = el('input', { type: 'button', value: '⚙', class: 'options' }) as HTMLButtonElement
   const z3_status_container = el('div', { style: 'margin-left: 0.4em;' })
-  const generate_line = el('div', { style: 'display: flex;' }, generate_button, options_button, z3_status_container)
+  const generate_line = el('div', { style: 'display: flex; margin-top: 0.4em;' }, generate_button, options_button, z3_status_container)
   const regular_toggle = el('input', { type: 'checkbox' }, 'Regular') as HTMLInputElement
   const model_container = el('div', { class: 'model-container' })
+  const input_container = el('div', {}, current_mi.element)
 
-  mi.all_constraints.watch((all_constraints) => {
+  const set_all_constraints = (all_constraints: Constraint[] | undefined): void => {
+    console.log(all_constraints)
     if (all_constraints === undefined) {
+      console.log('disabled')
       generate_button.disabled = true
     } else {
+      console.log('enabled')
       generate_button.disabled = false
     }
+  }
+
+  display_picker.options.watch((display_code) => {
+    current_mi = input_elements_map[display_code]
+    input_container.innerHTML = ''
+    input_container.appendChild(current_mi.element)
+    set_all_constraints(current_mi.all_constraints.get())
   }).call()
+
+  for (const current_input of Object.values(input_elements_map)) {
+    current_input.all_constraints.watch((all_constraints) => {
+      set_all_constraints(all_constraints)
+    }).call()
+  }
 
   regular_toggle.addEventListener('change', () => {
     is_regular.set(regular_toggle.checked)
@@ -682,10 +814,9 @@ const main = (): HTMLElement => {
     z3_status_container.innerHTML = ''
     if (state.tag === 'loading') {
       z3_status_container.append('Loading Z3...')
-      generate_button.disabled = true
     } else if (state.tag === 'ready') {
       z3_is_ready(state.ctx)
-      generate_button.disabled = false
+      set_all_constraints(current_mi.all_constraints.get())
     } else if (state.tag === 'error') {
       z3_status_container.append(state.message)
       z3_status_container.style.color = 'red'
@@ -701,7 +832,7 @@ const main = (): HTMLElement => {
   const z3_is_ready = (ctx: Context) => {
     generate_button.addEventListener('click', async () => {
       console.log('clicked generate!')
-      const constraints = assert_exists(mi.all_constraints.get(), 'Generate button clicked but not all constraints ready!')
+      const constraints = assert_exists(current_mi.all_constraints.get(), 'Generate button clicked but not all constraints ready!')
       console.log('constraints:', constraints.map(constraint_to_string))
 
       model_container.innerHTML = ''
@@ -730,7 +861,8 @@ const main = (): HTMLElement => {
   }
 
   return el('div', {},
-    mi.element,
+    display_picker.element,
+    input_container,
     generate_line,
     regular_toggle,
     model_container,
@@ -743,31 +875,3 @@ if (!hasMathMLSupport()) {
 }
 
 root.appendChild(main())
-
-// (async () => {
-//   root.append('loading...')
-//   const { Context } = await init_z3()
-//   root.innerHTML = ''
-//   const ctx = Context('main')
-//   root.appendChild(main(ctx))
-// })()
-// .then(() => {
-//   console.log('loaded z3!')
-// })
-// .catch((error) => {
-//   root.innerHTML = ''
-//   const error_el = el('div', { style: 'color: red; display: block;' },
-//     el('div', {}, 'There was an error loading z3.'),
-//     el('div', {}, 'Try closing out of this tab and opening it back up again.'),
-//   )
-//   if (error instanceof RangeError) {
-//     console.log('yes it is a RangeError')
-//     if (error.message === 'Out of memory') {
-//       error_el.appendChild(el('div', {}, '(This error happens when you reload the page too frequently)'))
-//     }
-//   }
-//   root.append(error_el)
-// })
-// .finally(() => {
-//   console.log('we done anyway')
-// })

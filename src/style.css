@@ -23,6 +23,18 @@
   margin-left: 0.4em;
 } */
 
+.common-element {
+  background-color: gainsboro;
+  border-radius: 0.4em;
+  padding: 0.4em;
+  width: fit-content;
+}
+
+.button {
+  background-color: gainsboro;
+  border-radius: 0.4em;
+}
+
 .single-input input.text {
   font-family: monospace;
   resize: both;
@@ -56,7 +68,7 @@
   border-radius: 0.4em;
 }
 
-.single-input input[type=button].info.error {
+.error {
   color: red;
 }
 

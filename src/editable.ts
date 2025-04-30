@@ -86,6 +86,18 @@ export class EditableDLL<T> {
 
   [Symbol.iterator]() { return this.values[Symbol.iterator]() }
 
+  set_all(ts: T[]): void {
+    for (const t of this) {
+      this.remove(t)
+    }
+
+    let last: undefined | T = undefined
+    for (const t of ts) {
+      this.insert_after(last, t)
+      last = t
+    }
+  }
+
   insert_after(lead_sibling: T | undefined, to_insert: T): DLLElement<T> {
     const all_lead_sibling_elements = lead_sibling === undefined ? undefined : [...this.values.data_containers(lead_sibling)]
     assert(all_lead_sibling_elements === undefined || all_lead_sibling_elements.length === 1, 'EditableDLL lead_sibling appears 0 or ≥ 2 times in the list!')
