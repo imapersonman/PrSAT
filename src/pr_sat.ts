@@ -1028,7 +1028,7 @@ export const translate_constraint = (tt: TruthTable, constraint: Constraint): Co
   } else if (constraint.tag === 'not_equal') {
     const tl = translate_real_expr(tt, constraint.left)
     const tr = translate_real_expr(tt, constraint.right)
-    return { tag: 'negation', constraint: { tag: 'equal', left: tl, right: tr } }
+    return { tag: 'not_equal', left: tl, right: tr }
   } else if (constraint.tag === 'less_than') {
     const tl = translate_real_expr(tt, constraint.left)
     const tr = translate_real_expr(tt, constraint.right)

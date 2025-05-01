@@ -4,7 +4,7 @@ import { el, math_el } from "./el";
 import { assert, assert_exists, NumericKeys, Res } from "./utils";
 import { debounce } from "./debounce";
 import { parse_constraint, parse_constraint_or_real_expr } from "./parser";
-import { constraint_to_string, possible_constraint_connectives, possible_sentence_connectives, TruthTable, variables_in_constraints } from "./pr_sat";
+import { possible_constraint_connectives, possible_sentence_connectives, TruthTable, variables_in_constraints } from "./pr_sat";
 import { evaluate_constraint, evaluate_real_expr, init_z3, ModelAssignmentOutput, pr_sat_with_truth_table } from "./z3_integration";
 import { s_to_string } from "./s";
 
@@ -84,10 +84,12 @@ type SingleInput<ParseOutput extends {}> = {
   input: HTMLInputElement
   watch_group: WatchGroup<unknown>
   constraint: rEditable<ParseOutput | undefined | { error: string }>
+  set_text: (text: string) => void
 }
 
 const single_input_callbacks_after = <ParseOutput extends {}>(
   siblings: EditableDLL<SingleInput<ParseOutput>>,
+  placeholder: string,
   input_instructions: string,
   parser: (text: string) => Res<ParseOutput, string>,
   display: (output: ParseOutput) => Element,
@@ -112,7 +114,7 @@ const single_input_callbacks_after = <ParseOutput extends {}>(
       recheck_ready()
     },
     make_newline: (si: SingleInput<ParseOutput>) => {
-      const new_input = single_input(CONSTRAINT_INPUT_PLACEHOLDER, input_instructions, parser, display, self)
+      const new_input = single_input(placeholder, input_instructions, parser, display, self)
       siblings.insert_after(si, new_input)
       new_input.input.focus()
       recheck_ready()
@@ -129,7 +131,6 @@ const single_input_callbacks_after = <ParseOutput extends {}>(
           const next_sibling = siblings.get_next(si)
           next_sibling?.input.focus()
           next_sibling?.input.setSelectionRange(0, 0)
-          console.log('next!')
         }
         siblings.remove(si)
         si.watch_group.unwatch()
@@ -351,7 +352,6 @@ const single_input = <ParseOutput extends {}>(
 
   i.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
-      console.log('enter!')
       callbacks.make_newline(self)
     } else if (event.key === 'ArrowUp') {
       callbacks.focus_prev(self)
@@ -456,7 +456,6 @@ const single_input = <ParseOutput extends {}>(
   })
 
   show_info.watch((show_info) => {
-    console.log('show_info:', show_info)
     if (show_info) {
       info_container.style.display = 'block'
     } else {
@@ -464,13 +463,27 @@ const single_input = <ParseOutput extends {}>(
     }
   }).call()
 
-  const self: SingleInput<ParseOutput> = { full: e, input: i, constraint, watch_group }
+  const set_text = (text: string) => {
+    const input_event = new InputEvent('input', {
+      bubbles: true,
+      cancelable: true,
+      inputType: 'insertText',
+      data: text,
+    })
+    i.value = text
+    i.dispatchEvent(input_event)
+  }
+
+  const self: SingleInput<ParseOutput> = { full: e, input: i, constraint, watch_group, set_text }
   return self
 }
 
 type MultiInput<ParseOutput extends {}> = {
   element: HTMLElement
   all_constraints: rEditable<ParseOutput[] | undefined>
+  get_fields: () => string[]
+  set_fields: (fields: string[]) => void
+  refresh: () => void
 }
 
 const multi_input = <ParseOutput extends {}>(
@@ -480,7 +493,7 @@ const multi_input = <ParseOutput extends {}>(
   display: (output: ParseOutput) => Element,
 ): MultiInput<ParseOutput> => {
   const children = new EditableDLL<SingleInput<ParseOutput>>([])
-  const [all_are_ready, callbacks] = single_input_callbacks_after(children, input_instructions, parser, display)
+  const [all_are_ready, callbacks] = single_input_callbacks_after(children, input_placeholder, input_instructions, parser, display)
   const first = single_input(input_placeholder, input_instructions, parser, display, callbacks)
   const all_constraints = new Editable<ParseOutput[] | undefined>(undefined)
   children.insert_after(undefined, first)
@@ -513,14 +526,62 @@ const multi_input = <ParseOutput extends {}>(
         }
         all_constraints_array.push(constraint)
       }
-      console.log('recomputing constraints!')
       all_constraints.set(all_constraints_array)
     } else {
       all_constraints.set(undefined)
     }
   })
 
-  return { element: parent, all_constraints }
+  const get_fields = (): string[] => {
+    const fields: string[] = []
+    for (const child of children) {
+      const f = child.input.value
+      fields.push(f)
+    }
+    return fields
+  }
+
+  const set_fields = (fields: string[]) => {
+    if (fields.length <= children.size()) {
+      for (const [index, child] of children.entries()) {
+        if (index < fields.length) {
+          const f = assert_exists(fields[index], 'fields[index] is undefined!')
+          child.set_text(f)
+        } else {
+          if (child === first) {
+            child.set_text('')
+          } else {
+            children.remove(child)
+          }
+        }
+      }
+    } else if (fields.length > children.size()) {
+      let last_child: SingleInput<ParseOutput> | undefined = undefined
+      for (const [index, child] of children.entries()) {
+        console.log(child.full)
+        const f = assert_exists(fields[index], 'fields[index] is undefined!')
+        child.set_text(f)
+        last_child = child
+      }
+
+      for (let beyond_index = children.size(); beyond_index < fields.length; beyond_index++) {
+        const f = assert_exists(fields[beyond_index], 'fields[beyond_index] is undefined!')
+        const new_child = single_input(input_placeholder, input_instructions, parser, display, callbacks)
+        console.log(new_child.full)
+        new_child.set_text(f)
+        children.insert_after(last_child, new_child)
+        last_child = new_child
+      }
+    }
+  }
+
+  const refresh = () => {
+    for (const child of children) {
+      child.set_text(child.input.value)
+    }
+  }
+
+  return { element: parent, all_constraints, set_fields, get_fields, refresh }
 }
 
 const update_constraints_view = <ParseOutput extends {}>(
@@ -573,7 +634,7 @@ const batch_input = <ParseOutput extends {}>(
   const info_button = el('input', {type: 'button', value: 'Show input instructions' }) as HTMLButtonElement
   const info_container = el('div', { style: 'white-space: pre-wrap; margin-bottom: 0.4em;' },
     `Insert a list of [Constraint]s separated by a newline.\n\n${input_instructions}`)
-  const file_loader = el('input', { type: 'file', value: 'Load input' }) as HTMLInputElement
+  const file_loader = el('input', { type: 'file', value: 'Load input', title: ' ' }) as HTMLInputElement
   const pre_button_line = el('div', { class: 'button-line', style: 'margin-bottom: 0.4em;' }, file_loader, info_button)
   const parse_button = el('input', { type: 'button', value: '', class: 'button' }) as HTMLButtonElement
   const save_button = el('input', { type: 'button', value: 'Save input', class: 'button' }) as HTMLButtonElement
@@ -669,13 +730,26 @@ const batch_input = <ParseOutput extends {}>(
     parse()
   }
 
+  const get_fields = (): string[] => {
+    const lines = textbox.value.split('\n')
+    return lines
+  }
+
+  const set_fields = (fields: string[]) => {
+    textbox.value = fields.join('\n')
+  }
+
+  const refresh = () => {
+    parse()
+  }
+
   const element = el('div', { class: 'common-element batch-input' },
     pre_button_line,
     info_container,
     textbox,
     button_line,
     constraints_view)
-  return { element, all_constraints }
+  return { element, all_constraints, get_fields, set_fields, refresh }
 }
 
 const model_assignment_display = (ma: ModelAssignmentOutput): Node => {
@@ -742,7 +816,7 @@ const truth_table_display = (tt: TruthTable): HTMLElement => {
   for (const state_index of tt.state_indices()) {  // rows
     const row = el('tr', {})
     for (const l of tt.letters()) {
-      const letter_value = tt.letter_value_from_index(l, state_index)  // Scary parseInt!
+      const letter_value = tt.letter_value_from_index(l, state_index)
       const value_string = letter_value ? '⊤' : '⊥'
       row.appendChild(el('td', {}, value_string))
     }
@@ -774,11 +848,12 @@ const model_display = (model: [TruthTable, Record<number, ModelAssignmentOutput>
   head_row.appendChild(el('th', { class: 'dv' }))
   head_row.appendChild(el('th', {}, 'Assignment'))
 
-  for (const [index, ma] of Object.entries(model_assignments)) {  // rows
+  for (const [i, ma] of Object.entries(model_assignments)) {  // rows
+    const index = parseInt(i)
     const assignment_html = model_assignment_display(ma)
     const row = el('tr', {})
     for (const l of tt.letters()) {
-      const letter_value = tt.letter_value_from_index(l, parseInt(index))  // Scary parseInt!
+      const letter_value = tt.letter_value_from_index(l, index)  // Scary parseInt!
       const value_string = letter_value ? '⊤' : '⊥'
       row.appendChild(el('td', {}, value_string))
     }
@@ -824,7 +899,7 @@ type ModelFinderState =
   | { tag: 'sat', truth_table: TruthTable, assignments: Record<number, ModelAssignmentOutput>, state_values: Record<number, number> }
   | { tag: 'unsat' }
   | { tag: 'unknown' }
-  | { tag: 'invalidated' }
+  | { tag: 'invalidated', last: { truth_table: TruthTable, state_values: Record<number, number> } }
 
 type ModelFinderDisplay = {
   element: HTMLElement
@@ -865,15 +940,19 @@ const value_to_string = (value: boolean | number): string => {
   }
 }
 
-const model_evaluators = (state: rEditable<ModelFinderState>): HTMLElement => {
-  const model_assignments = new Editable<{ truth_table: TruthTable, values: Record<number, number> } | undefined>(undefined)
+type ModelEvaluator = {
+  element: HTMLElement
+  multi_input: MultiInput<ConstraintOrRealExpr>
+}
 
+const model_evaluators = (model_assignments: rEditable<{ truth_table: TruthTable, values: Record<number, number> } | undefined>): ModelEvaluator => {
   const display_constraint_or_real_expr_with_evaluation = (e: ConstraintOrRealExpr): Element => {
     const d = display_constraint_or_real_expr(e)
     const assignments = model_assignments.get()
     if (assignments === undefined) {
       return d
     } else {
+      // Weird that we're evaluating in a display function but I don't care.
       const value = evaluate_constraint_or_real_expr(assignments.truth_table, assignments.values, e)
       return el('div', { style: 'display: flex;' },
         d,
@@ -886,34 +965,28 @@ const model_evaluators = (state: rEditable<ModelFinderState>): HTMLElement => {
     EVALUATOR_INPUT_PLACEHOLDER,
     BATCH_EVALUATOR_INPUT_PLACEHOLDER,
     CONSTRAINT_OR_REAL_EXPR_INPUT_INSTRUCTIONS,
-    parse_constraint_or_real_expr, display_constraint_or_real_expr_with_evaluation)
-
-  state.watch((state) => {
-    if (state.tag === 'sat') {
-      model_assignments.set({ truth_table: state.truth_table, values: state.state_values })
-    } else {
-      model_assignments.set(undefined)
-    }
-  })
+    parse_constraint_or_real_expr,
+    display_constraint_or_real_expr_with_evaluation)
 
   const element = el('div', { class: 'model-evaluators' },
     el('div', { style: 'margin-bottom: 0.4em;' }, 'Evaluate model'),
     mi.element,
   )
-  return element
+  return { element, multi_input: mi }
 }
 
 const model_finder_display = (): ModelFinderDisplay => {
   const state = new Editable<ModelFinderState>({ tag: 'waiting' })
+  const model_assignments = new Editable<{ truth_table: TruthTable, values: Record<number, number> } | undefined>(undefined)
   const model_container = el('div', { class: 'model-container' })
   const state_display = el('div', {})
   const left_side = el('div', {},
     state_display,
     model_container,
   )
-  const evaluators = model_evaluators(state)
+  const evaluators = model_evaluators(model_assignments)
   const right_side = el('div', {},
-    evaluators,
+    evaluators.element,
   )
   const split_view = el('div', { style: 'display: flex;' },
     left_side,
@@ -955,7 +1028,14 @@ const model_finder_display = (): ModelFinderDisplay => {
   }
 
   const invalidate = (): void => {
-    state.set({ tag: 'invalidated' })
+    const last_state = state.get()
+    if (last_state.tag === 'invalidated') {
+      // do nothing!
+    } else if (last_state.tag === 'sat') {
+      state.set({ tag: 'invalidated', last: last_state })
+    } else {
+      state.set({ tag: 'waiting' })
+    }
   }
 
   const element = el('div', { class: 'model-finder' },
@@ -964,11 +1044,26 @@ const model_finder_display = (): ModelFinderDisplay => {
   )
 
   state.watch((state) => {
+    // Logic
+    console.log('state set!', state.tag)
+    if (state.tag === 'sat') {
+      model_assignments.set({ truth_table: state.truth_table, values: state.state_values })
+      evaluators.multi_input.refresh()
+    } else if (state.tag === 'invalidated') {
+      evaluators.multi_input.refresh()
+    } else if (state.tag === 'unsat') {
+      model_assignments.set(undefined)
+    }
+    
+    // Display
     element.classList.remove('invalidated')
-    right_side.innerHTML = ''
     if (state.tag === 'waiting') {
+      right_side.innerHTML = ''
       state_display.innerHTML = ''
-      state_display.append('No model to display')
+      state_display.append('No model to display!')
+      element.classList.add('invalidated')
+      model_container.innerHTML = ''
+      constraints_view.innerHTML = ''
     } else if (state.tag === 'looking') {
       state_display.innerHTML = ''
       state_display.append('Searching for model satisfying constraints...')
@@ -978,13 +1073,14 @@ const model_finder_display = (): ModelFinderDisplay => {
       const model_html = model_display([state.truth_table, state.assignments])
       model_container.innerHTML = ''
       model_container.appendChild(model_html)
-      right_side.appendChild(evaluators)
+      right_side.appendChild(evaluators.element)
     } else if (state.tag === 'unknown') {
       state_display.innerHTML = ''
       state_display.append('Unable to determine if constraints are satisfiable')
     } else if (state.tag === 'unsat') {
       state_display.innerHTML = ''
       state_display.append('Constraints are UNSATisfiable.')
+      right_side.innerHTML = ''
     } else if (state.tag === 'invalidated') {
       state_display.innerHTML = ''
       state_display.append('No up-to-date model to display')
@@ -1021,11 +1117,18 @@ const generic_multi_input = <ParseOutput extends {}>(
   } as const
   let current_mi = input_elements_map[default_mode]
 
-  display_picker.options.watch((display_code) => {
+  display_picker.options.watch((display_code, last_display_code) => {
     current_mi = input_elements_map[display_code]
     input_container.innerHTML = ''
     input_container.appendChild(current_mi.element)
-    all_constraints.set(current_mi.all_constraints.get())
+    // all_constraints.set(current_mi.all_constraints.get())
+
+    if (last_display_code !== undefined) {
+      const last_mi = assert_exists(input_elements_map[last_display_code])
+      if (last_mi) {
+        current_mi.set_fields(last_mi.get_fields())
+      }
+    }
   }).call()
 
   for (const current_input of Object.values(input_elements_map)) {
@@ -1034,11 +1137,25 @@ const generic_multi_input = <ParseOutput extends {}>(
     }).call()
   }
 
+  const get_fields = (): string[] => {
+    return current_mi.get_fields()
+  }
+
+  const set_fields = (fields: string[]) => {
+    current_mi.set_fields(fields)
+  }
+
+  const refresh = () => {
+    for (const input of Object.values(input_elements_map)) {
+      input.refresh()
+    }
+  }
+
   const element = el('div', {},
     display_picker.element,
     input_container,
   )
-  return { element, all_constraints }
+  return { element, all_constraints, get_fields, set_fields, refresh }
 }
 
 const main = (): HTMLElement => {
@@ -1053,13 +1170,10 @@ const main = (): HTMLElement => {
   const model_finder = model_finder_display()
 
   const set_all_constraints = (all_constraints: Constraint[] | undefined) => {
-    console.log(all_constraints)
     model_finder.invalidate()
     if (all_constraints === undefined) {
-      console.log('disabled')
       generate_button.disabled = true
     } else {
-      console.log('enabled')
       generate_button.disabled = false
     }
   }
@@ -1093,6 +1207,7 @@ const main = (): HTMLElement => {
     z3_status_container.innerHTML = ''
     if (state.tag === 'loading') {
       z3_status_container.append('Loading Z3...')
+      generate_button.disabled = true
     } else if (state.tag === 'ready') {
       z3_is_ready(state.ctx)
       set_all_constraints(mi.all_constraints.get())
@@ -1110,10 +1225,8 @@ const main = (): HTMLElement => {
 
   const z3_is_ready = (ctx: Context) => {
     generate_button.addEventListener('click', async () => {
-      console.log('clicked generate!')
       const constraints = assert_exists(mi.all_constraints.get(), 'Generate button clicked but not all constraints ready!')
-      console.log('constraints:', constraints.map(constraint_to_string))
-      model_finder.start_search(ctx, constraints, is_regular.get())
+      await model_finder.start_search(ctx, constraints, is_regular.get())
     })
   }
 

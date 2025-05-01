@@ -86,6 +86,10 @@ export class EditableDLL<T> {
 
   [Symbol.iterator]() { return this.values[Symbol.iterator]() }
 
+  *entries(): Generator<[number, T]> {
+    yield *this.values.entries()
+  }
+
   set_all(ts: T[]): void {
     for (const t of this) {
       this.remove(t)

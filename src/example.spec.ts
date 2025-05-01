@@ -257,6 +257,7 @@ describe('z3', () => {
   })
   describe('raven\'s paradox', () => {
     const _1_through_2 = [
+      gt(pr(and(not(H), and(not(B), R))), lit(0)),  // Extra unstated assumption.
       eq(cpr(B, and(R, H)), lit(1)),
       gt(pr(not(B)), pr(R)),
     ]
@@ -270,7 +271,7 @@ describe('z3', () => {
     const _7 = lt(cpr(H, and(not(R), B)), pr(H))
     const _C = gte(cpr(H, R), cpr(H, not(B)))
     const regular = false
-    test.skip('(1) - (4) entail (5)', async () => {
+    test('(1) - (4) entail (5)', async () => {
       const { Context } = await init_z3()
 
       const constraints = [
@@ -284,7 +285,7 @@ describe('z3', () => {
       }
       expect(sat).toEqual('unsat')
     })
-    test.skip('(1) - (4) entail (6)', async () => {
+    test('(1) - (4) entail (6)', async () => {
       const { Context } = await init_z3()
 
       const constraints = [
@@ -298,7 +299,7 @@ describe('z3', () => {
       // }
       expect(sat).toEqual('unsat')
     })
-    test.skip('(1) - (4) entail (7)', async () => {
+    test('(1) - (4) entail (7)', async () => {
       const { Context } = await init_z3()
 
       const constraints = [
@@ -312,7 +313,7 @@ describe('z3', () => {
       // }
       expect(sat).toEqual('unsat')
     })
-    test.skip('(1), (2), (C) entail (5)', async () => {
+    test('(1), (2), (C) entail (5)', async () => {
       const { Context } = await init_z3()
 
       const constraints = [

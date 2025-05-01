@@ -69,6 +69,16 @@ export class DLL<D> {
     }
   }
 
+  *entries(): Generator<[number, D]> {
+    let current = this.first
+    let index = 0
+    while (current !== undefined) {
+      yield [index, current.data]
+      current = current.next
+      index++
+    }
+  }
+
   *from(element?: DLLElement<D>) {
     let current = element
     while (current !== undefined) {
