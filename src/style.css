@@ -109,3 +109,21 @@ input[type=button].options {
 .model-container table tr .dv {
   border-right: solid black;
 }
+
+.model-finder {
+  border-radius: 0.4em;
+  margin-top: 0.4em;
+  background-color: gainsboro;
+  width: fit-content;
+  padding: 0.4em;
+}
+
+.model-finder.invalidated {
+  opacity: 0.4;
+}
+
+.batch-input .button-line {
+  margin-top: 0.4em;
+  display: flex;
+  justify-content: space-between;
+}

@@ -373,16 +373,15 @@ export const model_to_assignments = async <CtxKey extends string>(ctx: Context<C
 //   }
 // }
 
-export const pr_sat = async <CtxKey extends string>(
+export const pr_sat_with_truth_table = async <CtxKey extends string>(
   ctx: Context<CtxKey>,
+  tt: TruthTable,
   constraints: Constraint[],
   regular: boolean = false,
 ): Promise<{ status: 'sat', all_constraints: Constraint[], tt: TruthTable, model: Record<number, ModelAssignmentOutput> } | { status: 'unsat' | 'unknown', all_constraints: Constraint[], tt: TruthTable, model: undefined }> => {
   const { Solver } = ctx
   const solver = new Solver();
 
-  const variables = variables_in_constraints(constraints)
-  const tt = new TruthTable(variables)
   const translated = translate(tt, constraints)
   const index_to_eliminate = tt.n_states() - 1  // Only this works right now!
   // const index_to_eliminate = 0
@@ -431,5 +430,14 @@ export const pr_sat = async <CtxKey extends string>(
   } else {
     return { status: result, all_constraints: translated, tt, model: undefined }
   }
+}
+
+export const pr_sat = async <CtxKey extends string>(
+  ctx: Context<CtxKey>,
+  constraints: Constraint[],
+  regular: boolean = false,
+): Promise<{ status: 'sat', all_constraints: Constraint[], tt: TruthTable, model: Record<number, ModelAssignmentOutput> } | { status: 'unsat' | 'unknown', all_constraints: Constraint[], tt: TruthTable, model: undefined }> => {
+  const tt = new TruthTable(variables_in_constraints(constraints))
+  return pr_sat_with_truth_table(ctx, tt, constraints, regular)
 }
 
