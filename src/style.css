@@ -7,7 +7,7 @@
 }
 
 .single-input {
-  display: flex;
+  /* display: flex; */
   width: fit-content;
   padding: 0.3em;
   border-radius: 0.4em;
@@ -15,7 +15,7 @@
   cursor: pointer;
 }
 
-.single-input > * > *:not(:first-child), .single-input > *:not(:first-child) {
+.single-input > * > * > *:not(:first-child), .single-input > *:not(:first-child) {
   margin-left: 0.4em;
 }
 
@@ -30,7 +30,7 @@
   width: fit-content;
 }
 
-.button {
+input[type=button] {
   background-color: gainsboro;
   border-radius: 0.4em;
 }
@@ -42,7 +42,7 @@
 }
 
 .single-input .constraint {
-  /* margin-left: 0.4em; */
+  margin-left: 0.4em;
 }
 
 .single-input .constraint.updating {
@@ -113,17 +113,39 @@ input[type=button].options {
 .model-finder {
   border-radius: 0.4em;
   margin-top: 0.4em;
-  background-color: gainsboro;
+  background-color: rgb(240, 240, 240);
   width: fit-content;
   padding: 0.4em;
 }
 
 .model-finder.invalidated {
-  opacity: 0.4;
+  /* background-color: lightgoldenrodyellow; */
+  opacity: 0.5;
 }
 
-.batch-input .button-line {
+.button-line {
   margin-top: 0.4em;
   display: flex;
   justify-content: space-between;
+}
+
+input::file-selector-button {
+  background-color: gainsboro;
+  border-radius: 0.4em;
+  margin-bottom: 0.4em;
+}
+
+.model-evaluators {
+  margin-left: 0.8em;
+}
+
+.model-input {
+  background-color: rgb(240, 240, 240);
+  padding: 0.4em;
+  width: fit-content;
+  border-radius: 0.4em;
+}
+
+.info-container {
+  /* margin-top: 0.4em; */
 }

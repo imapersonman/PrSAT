@@ -3,7 +3,7 @@ import { BINARY_LEFT, BINARY_RIGHT, make_parser, operators, PREFIX } from "./par
 import { clause, default_clause, match_s, S, spv } from "./s"
 import { sentence_builder, real_expr_builder, constraint_builder, possible_constraint_connectives, possible_sentence_connectives } from './pr_sat'
 import { assert_result, Res } from './utils'
-import { PrSat } from './types'
+import { ConstraintOrRealExpr, PrSat } from './types'
 
 type Sentence = PrSat['Sentence']
 type RealExpr = PrSat['RealExpr']
@@ -161,10 +161,14 @@ const ConstraintLang = P.createLanguage({
     .map((operands) => operands.reduceRight((pv, cv) => iff(cv, pv))),
 })
 
+const parse_error_to_string = (error: P.Failure): string => {
+  return `At column ${error.index.column}\nexpected ${error.expected.join(' ')}`
+}
+
 const parser_to_parse_func = <T>(parser: P.Parser<T>) => (input: string): Res<T, string> => {
   const parsed = parser.parse(input)
   if (!parsed.status) {
-    return [false, parsed.expected.join('\n')]
+    return [false, parse_error_to_string(parsed)]
   } else {
     return [true, parsed.value]
   }
@@ -181,3 +185,17 @@ export const parse_constraint = parser_to_parse_func<Constraint>(ConstraintLang.
 export const assert_parse_sentence = parse_func_to_asserted_func(parse_sentence)
 export const assert_parse_real_expr = parse_func_to_asserted_func(parse_real_expr)
 export const assert_parse_constraint = parse_func_to_asserted_func(parse_constraint)
+
+const ConstraintOrRealExprParser = P.alt(
+  ConstraintLang.Constraint.map((e) => ({ tag: 'constraint', constraint: e })),
+  ConstraintLang.RealExpr.map((e) => ({ tag: 'real_expr', real_expr: e })),
+)
+
+export const parse_constraint_or_real_expr = (input: string): Res<ConstraintOrRealExpr, string> => {
+  const parsed = ConstraintOrRealExprParser.parse(input)
+  if (!parsed.status) {
+    return [false, parse_error_to_string(parsed)]
+  } else {
+    return [true, parsed.value]
+  }
+}

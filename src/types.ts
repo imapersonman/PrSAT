@@ -37,6 +37,10 @@ type Constraint =
   | { tag: 'conditional', left: Constraint, right: Constraint }
   | { tag: 'biconditional', left: Constraint, right: Constraint }
 
+export type ConstraintOrRealExpr =
+  | { tag: 'constraint', constraint: Constraint }
+  | { tag: 'real_expr', real_expr: RealExpr }
+
 export type PrSat = {
   Sentence: Sentence
   RealExpr: RealExpr

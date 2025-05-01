@@ -3,21 +3,65 @@ import { Editable, EditableDLL, rEditable, WatchGroup } from './editable';
 import { el, math_el } from "./el";
 import { assert, assert_exists, NumericKeys, Res } from "./utils";
 import { debounce } from "./debounce";
-import { parse_constraint } from "./parser";
+import { parse_constraint, parse_constraint_or_real_expr } from "./parser";
 import { constraint_to_string, possible_constraint_connectives, possible_sentence_connectives, TruthTable, variables_in_constraints } from "./pr_sat";
-import { init_z3, ModelAssignmentOutput, pr_sat, pr_sat_with_truth_table } from "./z3_integration";
+import { evaluate_constraint, evaluate_real_expr, init_z3, ModelAssignmentOutput, pr_sat_with_truth_table } from "./z3_integration";
 import { s_to_string } from "./s";
 
 import './style.css'
-import { PrSat, SentenceMap } from "./types";
+import { ConstraintOrRealExpr, PrSat, SentenceMap } from "./types";
 import { Equiv } from "./tag_map";
 
 const DEFAULT_DEBOUNCE_MS = 150
 const CONSTRAINT_INPUT_PLACEHOLDER = 'Enter constraint'
+const BATCH_CONSTRAINT_INPUT_PLACEHOLDER = 'Enter constraints separated by newlines'
+const EVALUATOR_INPUT_PLACEHOLDER = 'Enter expression'
+const BATCH_EVALUATOR_INPUT_PLACEHOLDER = 'Enter expressions separated by newlines'
 const INFO_MESSAGE_EMPTY = 'ⓘ How?'
 const INFO_MESSAGE_ERROR = 'ⓘ Error!'
 const INFO_MESSAGE_OKAY = 'ⓘ'
 const FIND_MODEL_BUTTON_LABEL = 'Find Model'
+const DEFAULT_MULTI_INPUT_MODE: 'Batch' | 'Multi' = 'Multi'
+const CONSTRAINT_INPUT_INSTRUCTIONS = `
+To insert a [Constraint], type in one of:
+- '[RealExpr] = [RealExpr]' for equality,
+- '[RealExpr] ≠ [RealExpr]' or '[RealExpr] != [RealExpr]' for disequality,
+- '[RealExpr] < [RealExpr]' for less than,
+- '[RealExpr] > [RealExpr]' for greater than,
+- '[RealExpr] ≤ [RealExpr]' or '[RealExpr] <= [RealExpr] for less than or equal to,'
+- '[RealExpr] ≥ [RealExpr]' or '[RealExpr] >= [RealExpr] for greater than or equal to,'
+- '~[Constraint]', '![Constraint]', or '-[Constraint]' for negation,
+- '[Constraint] ∨ [Constraint]' or '[Constraint] \\/ [Constraint]' for disjunction (hint: the '∨' is NOT a v),
+- '[Constraint] & [Constraint]' for conjunction,
+- '[Constraint] → [Constraint]', '[Constraint] -> [Constraint]', or '[Constraint] > [Constraint]' for biconditional,
+- '[Constraint] ↔ [Constraint]', '[Constraint] <-> [Constraint]', or '[Constraint] <> [Constraint]' for biconditional.
+
+To insert a [RealExpr], type in one of:
+- Any number (integer or decimal),
+- 'Pr([Sentence])' for probability,
+- 'Pr([Sentence] | [Sentence])' for conditional probability,
+- '-[RealExpr]' for negatives,
+- '[RealExpr] + [RealExpr]' for addition,
+- '[RealExpr] - [RealExpr]' for subtraction,
+- '[RealExpr] * [RealExpr]' for multiplication,
+- '[RealExpr] / [RealExpr]' for division,
+- '[RealExpr]^[RealExpr]' for exponentiation.
+
+To insert a [Sentence], type in one of:
+- '⊤' or 'true' for truth (hint: the ⊤ is read as 'top', not 'tee'),
+- '⊥' or 'false' for falsity,
+- Any upper-case letter for propositional variable, optionally followed by an integer > 0,
+- '~[Sentence]', '![Sentence]', or '-[Sentence]' for negation,
+- '[Sentence] ∨ [Sentence]' or '[Sentence] \\/ [Sentence]' for disjunction (hint: the '∨' is NOT a v),
+- '[Sentence] & [Sentence]' for conjunction,
+- '[Sentence] → [Sentence]', '[Sentence] -> [Sentence]', or '[Sentence] > [Sentence]' for biconditional,
+- '[Sentence] ↔ [Sentence]', '[Sentence] <-> [Sentence]', or '[Sentence] <> [Sentence]' for biconditional.
+`.trim()
+const CONSTRAINT_OR_REAL_EXPR_INPUT_INSTRUCTIONS = `
+You can either insert a Constraint or a Real Expression.
+
+${CONSTRAINT_INPUT_INSTRUCTIONS}
+`.trim()
 
 const root = assert_exists(document.getElementById('app'), 'Root element with id \'#app\' doesn\'t exist!')
 
@@ -25,25 +69,30 @@ type Constraint = PrSat['Constraint']
 type RealExpr = PrSat['RealExpr']
 type Sentence = PrSat['Sentence']
 
-type SingleInputCallbacks = {
-  siblings: EditableDLL<SingleInput>
-  set_is_ready: (si: SingleInput, is_ready: boolean) => void
-  make_newline: (si: SingleInput) => void
-  remove: (si: SingleInput) => void
+type SingleInputCallbacks<ParseOutput extends {}> = {
+  siblings: EditableDLL<SingleInput<ParseOutput>>
+  set_is_ready: (si: SingleInput<ParseOutput>, is_ready: boolean) => void
+  make_newline: (si: SingleInput<ParseOutput>) => void
+  remove: (si: SingleInput<ParseOutput>) => void
   focus_first: () => void
-  focus_next: (si: SingleInput) => void
-  focus_prev: (si: SingleInput) => void
+  focus_next: (si: SingleInput<ParseOutput>) => void
+  focus_prev: (si: SingleInput<ParseOutput>) => void
 }
 
-type SingleInput = {
+type SingleInput<ParseOutput extends {}> = {
   full: HTMLElement
   input: HTMLInputElement
   watch_group: WatchGroup<unknown>
-  constraint: rEditable<Constraint | undefined | { error: string }>
+  constraint: rEditable<ParseOutput | undefined | { error: string }>
 }
 
-const single_input_callbacks_after = (siblings: EditableDLL<SingleInput>): [Editable<boolean>, SingleInputCallbacks] => {
-  const ready_set = new Set<SingleInput>()
+const single_input_callbacks_after = <ParseOutput extends {}>(
+  siblings: EditableDLL<SingleInput<ParseOutput>>,
+  input_instructions: string,
+  parser: (text: string) => Res<ParseOutput, string>,
+  display: (output: ParseOutput) => Element,
+): [Editable<boolean>, SingleInputCallbacks<ParseOutput>] => {
+  const ready_set = new Set<SingleInput<ParseOutput>>()
   const all_are_ready = new Editable(false)
   const recheck_ready = () => {
     if (ready_set.size === siblings.size()) {
@@ -52,7 +101,7 @@ const single_input_callbacks_after = (siblings: EditableDLL<SingleInput>): [Edit
       all_are_ready.set(false)
     }
   }
-  const self: SingleInputCallbacks = {
+  const self: SingleInputCallbacks<ParseOutput> = {
     siblings,
     set_is_ready: (si, is_ready) => {
       if (is_ready) {
@@ -62,13 +111,13 @@ const single_input_callbacks_after = (siblings: EditableDLL<SingleInput>): [Edit
       }
       recheck_ready()
     },
-    make_newline: (si: SingleInput) => {
-      const new_input = single_input(CONSTRAINT_INPUT_PLACEHOLDER, self)
+    make_newline: (si: SingleInput<ParseOutput>) => {
+      const new_input = single_input(CONSTRAINT_INPUT_PLACEHOLDER, input_instructions, parser, display, self)
       siblings.insert_after(si, new_input)
       new_input.input.focus()
       recheck_ready()
     },
-    remove: (si: SingleInput) => {
+    remove: (si: SingleInput<ParseOutput>) => {
       if (siblings.size() === 1) {
         // Don't do it!
       } else {
@@ -91,11 +140,11 @@ const single_input_callbacks_after = (siblings: EditableDLL<SingleInput>): [Edit
     focus_first: () => {
       siblings.at(0)?.full.focus()
     },
-    focus_next: (si: SingleInput) => {
+    focus_next: (si: SingleInput<ParseOutput>) => {
       const next_sibling = siblings.get_next(si)
       next_sibling?.input.focus()
     },
-    focus_prev: (si: SingleInput) => {
+    focus_prev: (si: SingleInput<ParseOutput>) => {
       const prev_sibling = siblings.get_previous(si)
       prev_sibling?.input.focus()
     },
@@ -245,17 +294,23 @@ const sentence_to_html = (s: Sentence): MathMLElement => {
   }
 }
 
-const single_input = (
+const single_input = <ParseOutput extends {}>(
   placeholder: string,
-  callbacks: SingleInputCallbacks,
-): SingleInput => {
+  input_instructions: string,
+  parser: (text: string) => Res<ParseOutput, string>,
+  display: (output: ParseOutput) => Element,
+  callbacks: SingleInputCallbacks<ParseOutput>,
+): SingleInput<ParseOutput> => {
   const DEFAULT_INPUT_WIDTH = placeholder.length
   const i = el('input', { type: 'input', class: 'text', style: `width: ${DEFAULT_INPUT_WIDTH}ch`, placeholder }) as HTMLInputElement
   const parse_error = new Editable<undefined | string>(undefined)
   const watch_group = new WatchGroup([])
-  const constraint = new Editable<Constraint | undefined | { error: string }>(undefined)
+  const constraint = new Editable<ParseOutput | undefined | { error: string }>(undefined)
   const info_message = new Editable<string>(INFO_MESSAGE_EMPTY)
   const info_button = el('input', { type: 'button', class: 'info' }) as HTMLButtonElement
+  const info_element = el('div', { style: 'white-space: pre-wrap; margin-top: 0.4em;' }, input_instructions)
+  const info_error_element = el('div', { class: 'error', style: 'white-space: pre-wrap; margin-top: 0.4em;' })
+  const info_container = el('div', { class: 'info-container' }, info_error_element, info_element)
   // const empty_display = el('input', { type: 'button', value: 'ⓘ How can I insert constraints?' })
   const constraint_display = el('div', { class: 'constraint' })
   // const error_display = el('span', { style: 'color: red; font-style: italic;' }, 'error')
@@ -280,7 +335,7 @@ const single_input = (
       // error_display.title = c.error
     } else {
       callbacks.set_is_ready(self, true)
-      constraint_display.appendChild(constraint_to_html(c))
+      constraint_display.appendChild(display(c))
       info_message.set(INFO_MESSAGE_OKAY)
       info_button.classList.remove('error')
     }
@@ -324,11 +379,12 @@ const single_input = (
     trail: () => {
       constraint_display.classList.remove('updating')
       if (i.value.length === 0) {
+        parse_error.set(undefined)
         constraint.set(undefined)
         return
       }
 
-      const [status, parsed] = parse_constraint(i.value)
+      const [status, parsed] = parser(i.value)
       if (!status) {
         constraint.set({ error: parsed })
         parse_error.set(parsed)
@@ -360,32 +416,73 @@ const single_input = (
 
   const e = el('div', { class: 'single-input' },
     el('div', { style: 'display: flex;' },
-        close_button,
-        i,
-        newline_button,
-        info_button,
+      el('div', { style: 'display: flex;' },
+          close_button,
+          i,
+          newline_button,
+          info_button,
+      ),
+      constraint_display
     ),
-    constraint_display
+    info_container,
   )
+  // const e = el('div', { class: 'single-input' },
+  //   el('div', { style: 'display: flex;' },
+  //       close_button,
+  //       i,
+  //       newline_button,
+  //       info_button,
+  //   ),
+  //   constraint_display
+  // )
 
   e.addEventListener('click', () => {
     i.focus()
   })
 
-  const self: SingleInput = { full: e, input: i, constraint, watch_group }
+  const show_info = new Editable(false)
+  info_button.onclick = () => {
+    show_info.set(!show_info.get())
+  }
+
+  parse_error.watch((error) => {
+    if (error === undefined) {
+      info_error_element.style.display = 'none'
+    } else {
+      info_error_element.style.display = 'block'
+      info_error_element.innerHTML = ''
+      info_error_element.append(`Error: ${error}`)
+    }
+  })
+
+  show_info.watch((show_info) => {
+    console.log('show_info:', show_info)
+    if (show_info) {
+      info_container.style.display = 'block'
+    } else {
+      info_container.style.display = 'none'
+    }
+  }).call()
+
+  const self: SingleInput<ParseOutput> = { full: e, input: i, constraint, watch_group }
   return self
 }
 
-type MultiInput = {
+type MultiInput<ParseOutput extends {}> = {
   element: HTMLElement
-  all_constraints: rEditable<Constraint[] | undefined>
+  all_constraints: rEditable<ParseOutput[] | undefined>
 }
 
-const multi_input = (): MultiInput => {
-  const children = new EditableDLL<SingleInput>([])
-  const [all_are_ready, callbacks] = single_input_callbacks_after(children)
-  const first = single_input(CONSTRAINT_INPUT_PLACEHOLDER, callbacks)
-  const all_constraints = new Editable<Constraint[] | undefined>(undefined)
+const multi_input = <ParseOutput extends {}>(
+  input_placeholder: string,
+  input_instructions: string,
+  parser: (text: string) => Res<ParseOutput, string>,
+  display: (output: ParseOutput) => Element,
+): MultiInput<ParseOutput> => {
+  const children = new EditableDLL<SingleInput<ParseOutput>>([])
+  const [all_are_ready, callbacks] = single_input_callbacks_after(children, input_instructions, parser, display)
+  const first = single_input(input_placeholder, input_instructions, parser, display, callbacks)
+  const all_constraints = new Editable<ParseOutput[] | undefined>(undefined)
   children.insert_after(undefined, first)
 
   const parent = el('div', { class: 'multi-input' })
@@ -397,6 +494,7 @@ const multi_input = (): MultiInput => {
       lead_sibling.full.insertAdjacentElement('afterend', to_insert.full)
     }
   }).call()
+
   children.watch_remove((to_remove) => {
     if (children.size() === 1) {
       throw new Error('Trying to remove the last element of a list!')
@@ -404,10 +502,10 @@ const multi_input = (): MultiInput => {
       to_remove.full.remove()
     }
   })
-  // 
+
   all_are_ready.watch((all_are_ready) => {
     if (all_are_ready) {
-      const all_constraints_array: Constraint[] = []
+      const all_constraints_array: ParseOutput[] = []
       for (const si of children) {
         const constraint = si.constraint.get()
         if (constraint === undefined || 'error' in constraint) {
@@ -425,11 +523,15 @@ const multi_input = (): MultiInput => {
   return { element: parent, all_constraints }
 }
 
-const update_constraints_view = (view: HTMLElement, parsed_lines: Res<Constraint, string>[]): void => {
+const update_constraints_view = <ParseOutput extends {}>(
+  view: HTMLElement,
+  parsed_lines: Res<ParseOutput, string>[],
+  display: (output: ParseOutput) => Element,
+): void => {
   view.innerHTML = ''
   for (const [status, constraint] of parsed_lines) {
     if (status) {
-      const constraint_view = constraint_to_html(constraint)
+      const constraint_view = display(constraint)
       view.appendChild(el('div', {}, constraint_view))
     } else {
       const error_view = el('span', { class: 'error' }, 'Error!')
@@ -453,7 +555,12 @@ const download = (data: string, filename: string, type: string): void => {
   }, 0); 
 }
 
-const batch_input = (): MultiInput => {
+const batch_input = <ParseOutput extends {}>(
+  input_placeholder: string,
+  input_instructions: string,
+  parser: (text: string) => Res<ParseOutput, string>,
+  display: (output: ParseOutput) => Element,
+): MultiInput<ParseOutput> => {
   const PARSE_BUTTON_EMPTY = 'Nothing to parse'  // in_sync = true, contains_error = false
   const PARSE_BUTTON_ERROR = 'Fix error before reparsing!'  // contains_error = true
   const PARSE_BUTTON_OUT_OF_SYNC = 'Parse'  // in_sync = false
@@ -461,18 +568,24 @@ const batch_input = (): MultiInput => {
 
   const in_sync = new Editable(false)
   const contains_error = new Editable(false)
+  const info_toggle = new Editable(false)
 
-  const file_loader = el('input', { type: 'file', class: 'common-element', value: 'Load input' }) as HTMLInputElement
+  const info_button = el('input', {type: 'button', value: 'Show input instructions' }) as HTMLButtonElement
+  const info_container = el('div', { style: 'white-space: pre-wrap; margin-bottom: 0.4em;' },
+    `Insert a list of [Constraint]s separated by a newline.\n\n${input_instructions}`)
+  const file_loader = el('input', { type: 'file', value: 'Load input' }) as HTMLInputElement
+  const pre_button_line = el('div', { class: 'button-line', style: 'margin-bottom: 0.4em;' }, file_loader, info_button)
   const parse_button = el('input', { type: 'button', value: '', class: 'button' }) as HTMLButtonElement
   const save_button = el('input', { type: 'button', value: 'Save input', class: 'button' }) as HTMLButtonElement
   const button_line = el('div', { class: 'button-line' }, parse_button, save_button)
-  const textbox = el('textarea', { style: 'display: block;', rows: '10', cols: '50' }) as HTMLTextAreaElement
+  const textbox = el('textarea', { placeholder: input_placeholder, style: 'display: block; border-radius: 0.4em;', rows: '10', cols: '50' }) as HTMLTextAreaElement
   const constraints_view = el('div', { style: 'margin-top: 0.4em;' })
-  const all_constraints = new Editable<Constraint[] | undefined>(undefined)
+  const all_constraints = new Editable<ParseOutput[] | undefined>(undefined)
 
   const set_state = (in_sync: boolean, contains_error: boolean): void => {
     parse_button.disabled = textbox.value === '' || in_sync
     save_button.disabled = textbox.value === ''
+
     if (textbox.value === '') {
       parse_button.value = PARSE_BUTTON_EMPTY
     } else if (in_sync && contains_error) {
@@ -480,14 +593,32 @@ const batch_input = (): MultiInput => {
     } else if (in_sync && !contains_error) {
       parse_button.value = PARSE_BUTTON_IN_SYNC
     } else if (!in_sync && contains_error) {
-      parse_button.value = PARSE_BUTTON_ERROR
+      parse_button.value = PARSE_BUTTON_OUT_OF_SYNC
     } else if (!in_sync && !contains_error) {
       parse_button.value = PARSE_BUTTON_OUT_OF_SYNC
+    }
+
+    if (contains_error) {
+      textbox.classList.add('has-error')
+    } else {
+      textbox.classList.remove('has-error')
     }
   }
 
   in_sync.watch((in_sync) => set_state(in_sync, contains_error.get()))
   contains_error.watch((contains_error) => set_state(in_sync.get(), contains_error)).call()
+
+  info_toggle.watch((info_toggle) => {
+    if (info_toggle) {
+      info_container.style.display = 'block'
+    } else {
+      info_container.style.display = 'none'
+    }
+  }).call()
+
+  info_button.onclick = () => {
+    info_toggle.set(!info_toggle.get())
+  }
 
   textbox.addEventListener('input', () => {
     in_sync.set(false)
@@ -500,8 +631,8 @@ const batch_input = (): MultiInput => {
     }
 
     const lines = textbox_value.split('\n')
-    const parsed_lines = lines.map(parse_constraint)
-    const good_lines: Constraint[] = []
+    const parsed_lines = lines.map(parser)
+    const good_lines: ParseOutput[] = []
 
     for (const [status, constraint] of parsed_lines) {
       if (status) {
@@ -518,7 +649,7 @@ const batch_input = (): MultiInput => {
       contains_error.set(true)
     }
 
-    update_constraints_view(constraints_view, parsed_lines)
+    update_constraints_view(constraints_view, parsed_lines, display)
     in_sync.set(true)
   }
 
@@ -539,7 +670,8 @@ const batch_input = (): MultiInput => {
   }
 
   const element = el('div', { class: 'common-element batch-input' },
-    file_loader,
+    pre_button_line,
+    info_container,
     textbox,
     button_line,
     constraints_view)
@@ -689,7 +821,7 @@ const simple_options_display = <const Options extends string[]>(options: Options
 type ModelFinderState =
   | { tag: 'waiting' }
   | { tag: 'looking', truth_table: TruthTable }
-  | { tag: 'sat', truth_table: TruthTable, assignments: Record<number, ModelAssignmentOutput> }
+  | { tag: 'sat', truth_table: TruthTable, assignments: Record<number, ModelAssignmentOutput>, state_values: Record<number, number> }
   | { tag: 'unsat' }
   | { tag: 'unknown' }
   | { tag: 'invalidated' }
@@ -701,10 +833,93 @@ type ModelFinderDisplay = {
   invalidate: () => void
 }
 
+const display_constraint_or_real_expr = (e: ConstraintOrRealExpr): Element => {
+  if (e.tag === 'constraint') {
+    return constraint_to_html(e.constraint)
+  } else {
+    return real_expr_to_html(e.real_expr)
+  }
+}
+
+const evaluate_constraint_or_real_expr = (tt: TruthTable, state_values: Record<number, number>, e: ConstraintOrRealExpr): boolean | number => {
+  if (e.tag === 'constraint') {
+    return evaluate_constraint(tt, state_values, e.constraint)
+  } else if (e.tag === 'real_expr') {
+    return evaluate_real_expr(tt, state_values, e.real_expr)
+  } else {
+    const check: Equiv<typeof e, never> = true
+    void check
+    throw new Error('evaluate_constraint_or_real_expr fallthrough')
+  }
+}
+
+const value_to_string = (value: boolean | number): string => {
+  if (typeof value === 'boolean') {
+    return value ? '⊤' : '⊥'
+  } else if (typeof value === 'number') {
+    return value.toString()
+  } else {
+    const check: Equiv<typeof value, never> = true
+    void check
+    throw new Error('value_to_string fallthrough')
+  }
+}
+
+const model_evaluators = (state: rEditable<ModelFinderState>): HTMLElement => {
+  const model_assignments = new Editable<{ truth_table: TruthTable, values: Record<number, number> } | undefined>(undefined)
+
+  const display_constraint_or_real_expr_with_evaluation = (e: ConstraintOrRealExpr): Element => {
+    const d = display_constraint_or_real_expr(e)
+    const assignments = model_assignments.get()
+    if (assignments === undefined) {
+      return d
+    } else {
+      const value = evaluate_constraint_or_real_expr(assignments.truth_table, assignments.values, e)
+      return el('div', { style: 'display: flex;' },
+        d,
+        el('span', { style: 'margin-left: 0.4em; margin-right: 0.4em;' }, '⟾'),
+        value_to_string(value))
+    }
+  }
+
+  const mi = generic_multi_input(
+    EVALUATOR_INPUT_PLACEHOLDER,
+    BATCH_EVALUATOR_INPUT_PLACEHOLDER,
+    CONSTRAINT_OR_REAL_EXPR_INPUT_INSTRUCTIONS,
+    parse_constraint_or_real_expr, display_constraint_or_real_expr_with_evaluation)
+
+  state.watch((state) => {
+    if (state.tag === 'sat') {
+      model_assignments.set({ truth_table: state.truth_table, values: state.state_values })
+    } else {
+      model_assignments.set(undefined)
+    }
+  })
+
+  const element = el('div', { class: 'model-evaluators' },
+    el('div', { style: 'margin-bottom: 0.4em;' }, 'Evaluate model'),
+    mi.element,
+  )
+  return element
+}
+
 const model_finder_display = (): ModelFinderDisplay => {
   const state = new Editable<ModelFinderState>({ tag: 'waiting' })
   const model_container = el('div', { class: 'model-container' })
   const state_display = el('div', {})
+  const left_side = el('div', {},
+    state_display,
+    model_container,
+  )
+  const evaluators = model_evaluators(state)
+  const right_side = el('div', {},
+    evaluators,
+  )
+  const split_view = el('div', { style: 'display: flex;' },
+    left_side,
+    right_side,
+  )
+  const constraints_view = el('div', {})
 
   const start_search = async (ctx: Context, constraints: Constraint[], is_regular: boolean): Promise<void> => {
     const truth_table = new TruthTable(variables_in_constraints(constraints))
@@ -713,9 +928,9 @@ const model_finder_display = (): ModelFinderDisplay => {
     try {
       const tt_display = truth_table_display(truth_table)
       model_container.appendChild(tt_display)
-      const { status, all_constraints, model } = await pr_sat_with_truth_table(ctx, truth_table, constraints, is_regular)
+      const { status, all_constraints, state_values, model } = await pr_sat_with_truth_table(ctx, truth_table, constraints, is_regular)
       if (status === 'sat') {
-        state.set({ tag: 'sat', truth_table, assignments: model })
+        state.set({ tag: 'sat', truth_table, assignments: model, state_values })
       } else if (status === 'unsat') {
         state.set({ tag: 'unsat' })
       } else if (status === 'unknown') {
@@ -725,9 +940,11 @@ const model_finder_display = (): ModelFinderDisplay => {
         void check
       }
 
+      constraints_view.innerHTML = ''
+      // constraints_view.append('Constraints:')
       for (const constraint of all_constraints) {
         const e = constraint_to_html(constraint)
-        model_container.appendChild(el('div', { style: 'margin-top: 0.4em;' }, e))
+        constraints_view.appendChild(el('div', { style: 'margin-top: 0.4em;' }, e))
       }
 
     } catch (e: any) {
@@ -742,11 +959,13 @@ const model_finder_display = (): ModelFinderDisplay => {
   }
 
   const element = el('div', { class: 'model-finder' },
-    state_display,
-    model_container)
+    split_view,
+    constraints_view,
+  )
 
   state.watch((state) => {
     element.classList.remove('invalidated')
+    right_side.innerHTML = ''
     if (state.tag === 'waiting') {
       state_display.innerHTML = ''
       state_display.append('No model to display')
@@ -759,6 +978,7 @@ const model_finder_display = (): ModelFinderDisplay => {
       const model_html = model_display([state.truth_table, state.assignments])
       model_container.innerHTML = ''
       model_container.appendChild(model_html)
+      right_side.appendChild(evaluators)
     } else if (state.tag === 'unknown') {
       state_display.innerHTML = ''
       state_display.append('Unable to determine if constraints are satisfiable')
@@ -783,16 +1003,45 @@ type Z3ContextState =
   | { tag: 'ready', ctx: Context }
   | { tag: 'error', message: string }
 
-const main = (): HTMLElement => {
-  const DEFAULT_MULTI_INPUT_ID = 'Batch'
-  const display_picker = simple_options_display(['Multi', 'Batch'], DEFAULT_MULTI_INPUT_ID)
+const generic_multi_input = <ParseOutput extends {}>(
+  single_input_placeholder: string,
+  batch_input_placeholder: string,
+  input_instructions: string,
+  parser: (text: string) => Res<ParseOutput, string>,
+  display: (output: ParseOutput) => Element,
+  default_mode: 'Multi' | 'Batch' = DEFAULT_MULTI_INPUT_MODE
+): MultiInput<ParseOutput> => {
+  const all_constraints = new Editable<ParseOutput[] | undefined>(undefined)
+  const display_picker = simple_options_display(['Multi', 'Batch'], default_mode)
+  const input_container = el('div', {})
   display_picker.element.style.marginBottom = '0.4em'
   const input_elements_map = {
-    'Multi': multi_input(),
-    'Batch': batch_input(),
+    'Multi': multi_input(single_input_placeholder, input_instructions, parser, display),
+    'Batch': batch_input(batch_input_placeholder, input_instructions, parser, display),
   } as const
-  let current_mi = input_elements_map[DEFAULT_MULTI_INPUT_ID]
+  let current_mi = input_elements_map[default_mode]
 
+  display_picker.options.watch((display_code) => {
+    current_mi = input_elements_map[display_code]
+    input_container.innerHTML = ''
+    input_container.appendChild(current_mi.element)
+    all_constraints.set(current_mi.all_constraints.get())
+  }).call()
+
+  for (const current_input of Object.values(input_elements_map)) {
+    current_input.all_constraints.watch((constraints) => {
+      all_constraints.set(constraints)
+    }).call()
+  }
+
+  const element = el('div', {},
+    display_picker.element,
+    input_container,
+  )
+  return { element, all_constraints }
+}
+
+const main = (): HTMLElement => {
   const is_regular = new Editable(false)
   const z3_state = new Editable<Z3ContextState>({ tag: 'loading' })
   const generate_button = el('input', { type: 'button', value: FIND_MODEL_BUTTON_LABEL, class: 'generate' }) as HTMLButtonElement
@@ -800,10 +1049,10 @@ const main = (): HTMLElement => {
   const z3_status_container = el('div', { style: 'margin-left: 0.4em;' })
   const generate_line = el('div', { style: 'display: flex; margin-top: 0.4em;' }, generate_button, options_button, z3_status_container)
   const regular_toggle = el('input', { type: 'checkbox' }, 'Regular') as HTMLInputElement
-  const input_container = el('div', {}, current_mi.element)
+  const mi = generic_multi_input(CONSTRAINT_INPUT_PLACEHOLDER, BATCH_CONSTRAINT_INPUT_PLACEHOLDER, CONSTRAINT_INPUT_INSTRUCTIONS, parse_constraint, constraint_to_html)
   const model_finder = model_finder_display()
 
-  const set_all_constraints = (all_constraints: Constraint[] | undefined): void => {
+  const set_all_constraints = (all_constraints: Constraint[] | undefined) => {
     console.log(all_constraints)
     model_finder.invalidate()
     if (all_constraints === undefined) {
@@ -815,18 +1064,13 @@ const main = (): HTMLElement => {
     }
   }
 
-  display_picker.options.watch((display_code) => {
-    current_mi = input_elements_map[display_code]
-    input_container.innerHTML = ''
-    input_container.appendChild(current_mi.element)
-    set_all_constraints(current_mi.all_constraints.get())
-  }).call()
+  is_regular.watch(() => {
+    model_finder.invalidate()
+  })
 
-  for (const current_input of Object.values(input_elements_map)) {
-    current_input.all_constraints.watch((all_constraints) => {
-      set_all_constraints(all_constraints)
-    }).call()
-  }
+  mi.all_constraints.watch((all_constraints) => {
+    set_all_constraints(all_constraints)
+  })
 
   regular_toggle.addEventListener('change', () => {
     is_regular.set(regular_toggle.checked)
@@ -851,7 +1095,7 @@ const main = (): HTMLElement => {
       z3_status_container.append('Loading Z3...')
     } else if (state.tag === 'ready') {
       z3_is_ready(state.ctx)
-      set_all_constraints(current_mi.all_constraints.get())
+      set_all_constraints(mi.all_constraints.get())
     } else if (state.tag === 'error') {
       z3_status_container.append(state.message)
       z3_status_container.style.color = 'red'
@@ -867,17 +1111,18 @@ const main = (): HTMLElement => {
   const z3_is_ready = (ctx: Context) => {
     generate_button.addEventListener('click', async () => {
       console.log('clicked generate!')
-      const constraints = assert_exists(current_mi.all_constraints.get(), 'Generate button clicked but not all constraints ready!')
+      const constraints = assert_exists(mi.all_constraints.get(), 'Generate button clicked but not all constraints ready!')
       console.log('constraints:', constraints.map(constraint_to_string))
       model_finder.start_search(ctx, constraints, is_regular.get())
     })
   }
 
   return el('div', {},
-    display_picker.element,
-    input_container,
-    generate_line,
-    regular_toggle,
+    el('div', { class: 'model-input' },
+      mi.element,
+      generate_line,
+      regular_toggle,
+    ),
     model_finder.element,
   )
 }
