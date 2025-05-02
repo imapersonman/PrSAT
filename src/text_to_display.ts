@@ -12,6 +12,9 @@ import './style.css'
 import { ConstraintOrRealExpr, PrSat, SentenceMap } from "./types";
 import { Equiv } from "./tag_map";
 
+import * as TestId from '../tests/test_ids'
+import { TestIdGenerator } from "../tests/test_ids";
+
 const DEFAULT_DEBOUNCE_MS = 150
 const CONSTRAINT_INPUT_PLACEHOLDER = 'Enter constraint'
 const BATCH_CONSTRAINT_INPUT_PLACEHOLDER = 'Enter constraints separated by newlines'
@@ -88,6 +91,7 @@ type SingleInput<ParseOutput extends {}> = {
 }
 
 const single_input_callbacks_after = <ParseOutput extends {}>(
+  test_id_gen: TestIdGenerator,
   siblings: EditableDLL<SingleInput<ParseOutput>>,
   placeholder: string,
   input_instructions: string,
@@ -114,7 +118,7 @@ const single_input_callbacks_after = <ParseOutput extends {}>(
       recheck_ready()
     },
     make_newline: (si: SingleInput<ParseOutput>) => {
-      const new_input = single_input(placeholder, input_instructions, parser, display, self)
+      const new_input = single_input(test_id_gen, placeholder, input_instructions, parser, display, self)
       siblings.insert_after(si, new_input)
       new_input.input.focus()
       recheck_ready()
@@ -296,6 +300,7 @@ const sentence_to_html = (s: Sentence): MathMLElement => {
 }
 
 const single_input = <ParseOutput extends {}>(
+  test_id_gen: TestIdGenerator,
   placeholder: string,
   input_instructions: string,
   parser: (text: string) => Res<ParseOutput, string>,
@@ -303,7 +308,7 @@ const single_input = <ParseOutput extends {}>(
   callbacks: SingleInputCallbacks<ParseOutput>,
 ): SingleInput<ParseOutput> => {
   const DEFAULT_INPUT_WIDTH = placeholder.length
-  const i = el('input', { type: 'input', class: 'text', style: `width: ${DEFAULT_INPUT_WIDTH}ch`, placeholder }) as HTMLInputElement
+  const i = tel(TestId.single_input.input, 'input', { type: 'input', class: 'text', style: `width: ${DEFAULT_INPUT_WIDTH}ch`, placeholder }) as HTMLInputElement
   const parse_error = new Editable<undefined | string>(undefined)
   const watch_group = new WatchGroup([])
   const constraint = new Editable<ParseOutput | undefined | { error: string }>(undefined)
@@ -404,17 +409,16 @@ const single_input = <ParseOutput extends {}>(
   })
 
   const close_button = el('input', { type: 'button', value: '⌫', class: 'close' })
-  // body.appendChild(close_button)
   close_button.addEventListener('click', () => {
     callbacks.remove(self)
   })
 
-  const newline_button = el('input', { type: 'button', value: '⏎', class: 'newline' })
+  const newline_button = tel(TestId.single_input.newline, 'input', { type: 'button', value: '⏎', class: 'newline' })
   newline_button.addEventListener('click', () => {
     callbacks.make_newline(self)
   })
 
-  const e = el('div', { class: 'single-input' },
+  const e = tel(test_id_gen.gen(), 'div', { class: 'single-input' },
     el('div', { style: 'display: flex;' },
       el('div', { style: 'display: flex;' },
           close_button,
@@ -426,15 +430,6 @@ const single_input = <ParseOutput extends {}>(
     ),
     info_container,
   )
-  // const e = el('div', { class: 'single-input' },
-  //   el('div', { style: 'display: flex;' },
-  //       close_button,
-  //       i,
-  //       newline_button,
-  //       info_button,
-  //   ),
-  //   constraint_display
-  // )
 
   e.addEventListener('click', () => {
     i.focus()
@@ -487,14 +482,15 @@ type MultiInput<ParseOutput extends {}> = {
 }
 
 const multi_input = <ParseOutput extends {}>(
+  test_id_gen: TestIdGenerator,
   input_placeholder: string,
   input_instructions: string,
   parser: (text: string) => Res<ParseOutput, string>,
   display: (output: ParseOutput) => Element,
 ): MultiInput<ParseOutput> => {
   const children = new EditableDLL<SingleInput<ParseOutput>>([])
-  const [all_are_ready, callbacks] = single_input_callbacks_after(children, input_placeholder, input_instructions, parser, display)
-  const first = single_input(input_placeholder, input_instructions, parser, display, callbacks)
+  const [all_are_ready, callbacks] = single_input_callbacks_after(test_id_gen, children, input_placeholder, input_instructions, parser, display)
+  const first = single_input(test_id_gen, input_placeholder, input_instructions, parser, display, callbacks)
   const all_constraints = new Editable<ParseOutput[] | undefined>(undefined)
   children.insert_after(undefined, first)
 
@@ -566,7 +562,7 @@ const multi_input = <ParseOutput extends {}>(
 
       for (let beyond_index = children.size(); beyond_index < fields.length; beyond_index++) {
         const f = assert_exists(fields[beyond_index], 'fields[beyond_index] is undefined!')
-        const new_child = single_input(input_placeholder, input_instructions, parser, display, callbacks)
+        const new_child = single_input(test_id_gen, input_placeholder, input_instructions, parser, display, callbacks)
         console.log(new_child.full)
         new_child.set_text(f)
         children.insert_after(last_child, new_child)
@@ -863,7 +859,7 @@ const model_display = (model: [TruthTable, Record<number, ModelAssignmentOutput>
     row.appendChild(el('td', {}, assignment_html))
     body.appendChild(row)
   }
-  const e = el('table', {},
+  const e = tel(TestId.model_table, 'table', {},
     head,
     body)
   return e
@@ -962,6 +958,7 @@ const model_evaluators = (model_assignments: rEditable<{ truth_table: TruthTable
   }
 
   const mi = generic_multi_input(
+    TestId.single_input.eval,
     EVALUATOR_INPUT_PLACEHOLDER,
     BATCH_EVALUATOR_INPUT_PLACEHOLDER,
     CONSTRAINT_OR_REAL_EXPR_INPUT_INSTRUCTIONS,
@@ -986,7 +983,7 @@ const model_finder_display = (): ModelFinderDisplay => {
   )
   const evaluators = model_evaluators(model_assignments)
   const right_side = el('div', {},
-    evaluators.element,
+    // evaluators.element,  // Will be added in the state watcher.
   )
   const split_view = el('div', { style: 'display: flex;' },
     left_side,
@@ -1100,6 +1097,7 @@ type Z3ContextState =
   | { tag: 'error', message: string }
 
 const generic_multi_input = <ParseOutput extends {}>(
+  test_id_gen: TestIdGenerator,
   single_input_placeholder: string,
   batch_input_placeholder: string,
   input_instructions: string,
@@ -1112,7 +1110,7 @@ const generic_multi_input = <ParseOutput extends {}>(
   const input_container = el('div', {})
   display_picker.element.style.marginBottom = '0.4em'
   const input_elements_map = {
-    'Multi': multi_input(single_input_placeholder, input_instructions, parser, display),
+    'Multi': multi_input(test_id_gen, single_input_placeholder, input_instructions, parser, display),
     'Batch': batch_input(batch_input_placeholder, input_instructions, parser, display),
   } as const
   let current_mi = input_elements_map[default_mode]
@@ -1158,15 +1156,19 @@ const generic_multi_input = <ParseOutput extends {}>(
   return { element, all_constraints, get_fields, set_fields, refresh }
 }
 
+const tel = (test_id: string, name: string, attrs: Record<string, string>, ...children: (Node | string)[]): HTMLElement => {
+  return el(name, { ...attrs, 'data-testid': test_id }, ...children)
+}
+
 const main = (): HTMLElement => {
   const is_regular = new Editable(false)
   const z3_state = new Editable<Z3ContextState>({ tag: 'loading' })
-  const generate_button = el('input', { type: 'button', value: FIND_MODEL_BUTTON_LABEL, class: 'generate' }) as HTMLButtonElement
+  const generate_button = tel(TestId.find_model, 'input', { type: 'button', value: FIND_MODEL_BUTTON_LABEL, class: 'generate' }) as HTMLButtonElement
   const options_button = el('input', { type: 'button', value: '⚙', class: 'options' }) as HTMLButtonElement
-  const z3_status_container = el('div', { style: 'margin-left: 0.4em;' })
+  const z3_status_container = tel(TestId.z3_status, 'div', { style: 'margin-left: 0.4em;' })
   const generate_line = el('div', { style: 'display: flex; margin-top: 0.4em;' }, generate_button, options_button, z3_status_container)
-  const regular_toggle = el('input', { type: 'checkbox' }, 'Regular') as HTMLInputElement
-  const mi = generic_multi_input(CONSTRAINT_INPUT_PLACEHOLDER, BATCH_CONSTRAINT_INPUT_PLACEHOLDER, CONSTRAINT_INPUT_INSTRUCTIONS, parse_constraint, constraint_to_html)
+  const regular_toggle = tel(TestId.regular_toggle, 'input', { type: 'checkbox' }, 'Regular') as HTMLInputElement
+  const mi = generic_multi_input(TestId.single_input.constraint, CONSTRAINT_INPUT_PLACEHOLDER, BATCH_CONSTRAINT_INPUT_PLACEHOLDER, CONSTRAINT_INPUT_INSTRUCTIONS, parse_constraint, constraint_to_html)
   const model_finder = model_finder_display()
 
   const set_all_constraints = (all_constraints: Constraint[] | undefined) => {
