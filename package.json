@@ -11,6 +11,8 @@
     "test": "vitest --allowOnly"
   },
   "devDependencies": {
+    "@playwright/test": "^1.52.0",
+    "@types/node": "^22.15.3",
     "@types/parsimmon": "^1.10.9",
     "@vitest/browser": "^2.1.8",
     "jsdom": "^25.0.1",
