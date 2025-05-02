@@ -22,6 +22,7 @@ export const model_table = 'model-table'
 export const single_input = readonly({
   constraint: test_id_generator('single-input-constraint'),
   eval: test_id_generator('single-input-eval'),
+  close: 'close',
   input: 'input',
   newline: 'newline',
 })

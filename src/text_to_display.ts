@@ -408,7 +408,7 @@ const single_input = <ParseOutput extends {}>(
     e.classList.remove('focused')
   })
 
-  const close_button = el('input', { type: 'button', value: '⌫', class: 'close' })
+  const close_button = tel(TestId.single_input.close, 'input', { type: 'button', value: '⌫', class: 'close' })
   close_button.addEventListener('click', () => {
     callbacks.remove(self)
   })

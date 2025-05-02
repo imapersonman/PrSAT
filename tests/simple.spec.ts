@@ -21,7 +21,7 @@ test('single constraint', async ({ page }) => {
   await expect(page.getByTestId(TestId.model_table)).toBeVisible({ timeout: DEFAULT_TIMEOUT })
 });
 
-test('adding a bunch of single inputs', async ({ page }) => {
+test('adding a bunch of constraints', async ({ page }) => {
   await to_load(page)
 
   const n_constraints = 10
@@ -33,6 +33,27 @@ test('adding a bunch of single inputs', async ({ page }) => {
 
   const si = page.getByTestId(TestId.single_input.constraint.get(n_constraints - 1))
   await expect(si).toBeVisible()
+})
+
+test('adding then removing a bunch of constraints', async ({ page }) => {
+  await to_load(page)
+
+  const n_constraints = 10
+  for (let cindex = 0; cindex < n_constraints; cindex++) {
+    const si = page.getByTestId(TestId.single_input.constraint.get(cindex))
+    await expect(si).toBeVisible()
+    await si.getByTestId(TestId.single_input.newline).click()
+  }
+
+  const si = page.getByTestId(TestId.single_input.constraint.get(n_constraints - 1))
+  await expect(si).toBeVisible()
+
+  for (let cindex = 0; cindex < n_constraints; cindex++) {
+    const si = page.getByTestId(TestId.single_input.constraint.get(cindex))
+    await expect(si).toBeVisible()
+    await si.getByTestId(TestId.single_input.close).click()
+    await expect(si).not.toBeVisible()
+  }
 })
 
 test('multiple constraints', async ({ page }) => {
