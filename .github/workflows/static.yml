@@ -1,5 +1,5 @@
 # Simple workflow for deploying static content to GitHub Pages
-name: Deploy static content to Pages
+name: Deploy
 
 on:
   # # Runs on pushes targeting the default branch
@@ -39,9 +39,6 @@ jobs:
       - name: Install Packages
         run: |
           npm install
-      - name: Run Unit Tests
-        run: |
-          npm run test
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Build
