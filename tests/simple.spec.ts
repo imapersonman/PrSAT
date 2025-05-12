@@ -1,5 +1,6 @@
 import { test, expect, Page, Locator } from '@playwright/test'
 import * as TestId from './test_ids'
+import * as Constants from '../src/constants'
 
 const URL = 'http://localhost:5173/'
 const DEFAULT_TIMEOUT = 20_000
@@ -19,6 +20,7 @@ test('single constraint', async ({ page }) => {
   await page.getByTestId(TestId.find_model).click()
 
   await expect(page.getByTestId(TestId.model_table)).toBeVisible({ timeout: DEFAULT_TIMEOUT })
+  await expect(page.getByText(Constants.SAT)).toBeVisible()
 });
 
 test('adding a bunch of constraints', async ({ page }) => {
@@ -81,4 +83,5 @@ test('multiple constraints', async ({ page }) => {
 
   await page.getByTestId(TestId.find_model).click()
   await expect(page.getByTestId(TestId.model_table)).toBeVisible({ timeout: DEFAULT_TIMEOUT })
+  await expect(page.getByText(Constants.SAT)).toBeVisible()
 })

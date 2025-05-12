@@ -3,7 +3,7 @@ import { match_s, S, spv, clause, s_to_string } from "./s"
 import { constraint_to_string, constraints_to_smtlib_string, eliminate_state_variable_index, enrich_constraints, parse_s, real_expr_to_smtlib, translate, translate_real_expr, TruthTable, variables_in_constraints } from "./pr_sat"
 // import { Res } from "../utils"
 import { PrSat } from "./types"
-import { assert, assert_exists, assert_result, Res } from "./utils"
+import { assert, assert_exists, assert_result, fallthrough, Res } from "./utils"
 import { Equiv } from "./tag_map"
 
 type RealExpr = PrSat['RealExpr']
@@ -167,7 +167,7 @@ export const evaluate_real_expr = (tt: TruthTable, state_values: Record<number, 
   } else if (expr.tag === 'divide') {
     return evaluate_real_expr(tt, state_values, expr.numerator) / evaluate_real_expr(tt, state_values, expr.denominator)
   } else {
-    throw new Error('evaluate_real_expr fallthrough')
+    return fallthrough('evaluate_real_expr', expr)
   }
 }
 

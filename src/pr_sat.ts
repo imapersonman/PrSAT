@@ -425,7 +425,7 @@ const probability_constraints = (tt: TruthTable, eliminated_index: number | unde
   return cs
 }
 
-type VariableLists = { real: string[], sentence: SentenceMap['letter'][] }
+export type VariableLists = { real: string[], sentence: SentenceMap['letter'][] }
 
 // Will modify letters array.
 const letters_in_constraint = (constraint: Constraint, letters: VariableLists = { real: [], sentence: [] }): VariableLists => {

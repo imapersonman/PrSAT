@@ -8,7 +8,8 @@
     "copy-files": "cp node_modules/z3-solver/build/z3-built.js node_modules/z3-solver/build/z3-built.wasm public",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest --allowOnly --run && npx playwright test --project chromium --project firefox"
+    "test": "vitest --allowOnly --run && npx playwright test --project chromium --project firefox",
+    "test-single": "vitest --allowOnly"
   },
   "devDependencies": {
     "@playwright/test": "^1.52.0",

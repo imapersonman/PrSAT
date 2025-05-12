@@ -184,4 +184,7 @@ export const lazy = <T>(make: () => T): { get: () => T } => {
     }
 }
 
+export const fallthrough = <R>(fname: string, _t: never): R => {
+    throw new Error(`${fname} fallthrough`)
+}
 

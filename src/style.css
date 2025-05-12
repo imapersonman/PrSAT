@@ -45,8 +45,17 @@ input[type=button] {
   margin-left: 0.4em;
 }
 
-.single-input .constraint.updating {
+.single-input .updating {
   opacity: 0.3;
+}
+
+.split-input-block .single-input + .single-input {
+  margin-top: 0.4em;
+}
+
+.split-input-block {
+  /* padding: 0.4em; */
+  /* border-radius: 0.4em; */
 }
 
 .single-input .close {
@@ -118,13 +127,12 @@ input[type=button].options {
   padding: 0.4em;
 }
 
-.model-finder.invalidated {
+.invalidated {
   /* background-color: lightgoldenrodyellow; */
   opacity: 0.5;
 }
 
 .button-line {
-  margin-top: 0.4em;
   display: flex;
   justify-content: space-between;
 }
@@ -148,4 +156,23 @@ input::file-selector-button {
 
 .info-container {
   /* margin-top: 0.4em; */
+}
+
+.generic-input-block {
+  border-radius: 0.4em;
+  padding: 0.4em;
+  background-color: rgb(240, 240, 240);
+}
+
+.generic-input-block * + * {
+  /* margin-top: 0.4em; */
+}
+
+.single-input {
+  margin-top: 0.4em;
+}
+
+.input-instructions {
+  white-space: pre-wrap;
+  margin-top: 0.4em;
 }

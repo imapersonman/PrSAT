@@ -37,3 +37,7 @@ export const set_el_attributes = (element: HTMLElement, attrs: { [_: string]: st
     element.setAttribute(key, attrs[key])
   return element
 }
+
+export const tel = (test_id: string, name: string, attrs: Record<string, string>, ...children: (Node | string)[]): HTMLElement => {
+  return el(name, { ...attrs, 'data-testid': test_id }, ...children)
+}
