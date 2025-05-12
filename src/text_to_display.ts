@@ -820,12 +820,19 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
   const constraints_view = el('div', {})
 
   const generate_button = tel(TestId.find_model, 'input', { type: 'button', value: Constants.FIND_MODEL_BUTTON_LABEL, class: 'generate' }) as HTMLButtonElement
-  const options_button = el('input', { type: 'button', value: '⚙', class: 'options' }) as HTMLButtonElement
+  // const options_button = el('input', { type: 'button', value: '⚙', class: 'options' }) as HTMLButtonElement
   const z3_status_container = tel(TestId.z3_status, 'div', { style: 'margin-left: 0.4em;' })
   const is_regular = new Editable(false)
   const regular_toggle = tel(TestId.regular_toggle, 'input', { type: 'checkbox' }, 'Regular') as HTMLInputElement
   const z3_state = new Editable<Z3ContextState>({ tag: 'loading' })
-  const generate_line = el('div', { style: 'display: flex;' }, generate_button, options_button, regular_toggle, z3_status_container)
+  const generate_line = el('div', { style: 'display: flex;' },
+    generate_button,
+    // options_button,
+    el('label', {},
+      regular_toggle,
+      'Regular',
+    ),
+    z3_status_container)
 
   const set_all_constraints = (all_constraints: Constraint[] | undefined) => {
     invalidate()
