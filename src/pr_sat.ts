@@ -1706,7 +1706,7 @@ const free_sentence_variables_in_real_expr = (expr: RealExpr, set: LetterSet): L
   return set
 }
 
-const free_sentence_variables_in_constraint = (c: Constraint, set: LetterSet): LetterSet => {
+export const free_sentence_variables_in_constraint = (c: Constraint, set: LetterSet): LetterSet => {
   const sub = (c: Constraint): void => {
     if (c.tag === 'biconditional') {
       sub(c.left)
@@ -1745,6 +1745,7 @@ const free_sentence_variables_in_constraint = (c: Constraint, set: LetterSet): L
     }
   }
 
+  sub(c)
   return set
 }
 

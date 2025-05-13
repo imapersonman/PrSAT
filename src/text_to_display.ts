@@ -3,7 +3,7 @@ import { Editable, rEditable } from './editable';
 import { el, math_el, tel } from "./el";
 import { assert, assert_exists, fallthrough, Res } from "./utils";
 import { parse_constraint, parse_constraint_or_real_expr } from "./parser";
-import { evaluate_constraint, evaluate_constraint_2, evaluate_real_expr, evaluate_real_expr_2, EvaluationError, sentence_to_string, TruthTable, VariableLists, variables_in_constraints } from "./pr_sat";
+import { evaluate_constraint_2, evaluate_real_expr_2, EvaluationError, sentence_to_string, TruthTable, VariableLists, variables_in_constraints } from "./pr_sat";
 import { init_z3, ModelAssignmentOutput, pr_sat_with_truth_table } from "./z3_integration";
 import { s_to_string } from "./s";
 import { ConstraintOrRealExpr, PrSat } from "./types";

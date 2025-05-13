@@ -1,12 +1,12 @@
 import { Context, Expr, init, Model, Z3HighLevel, Z3LowLevel } from "z3-solver"
 import { match_s, S, spv, clause, s_to_string } from "./s"
-import { validate_model, constraint_to_string, constraints_to_smtlib_string, eliminate_state_variable_index, enrich_constraints, evaluate_real_expr, parse_s, real_expr_to_smtlib, translate, translate_real_expr, TruthTable, VariableLists, variables_in_constraints } from "./pr_sat"
+import { validate_model, constraint_to_string, constraints_to_smtlib_string, eliminate_state_variable_index, enrich_constraints, evaluate_real_expr, parse_s, real_expr_to_smtlib, translate, TruthTable, variables_in_constraints } from "./pr_sat"
 // import { Res } from "../utils"
 import { PrSat } from "./types"
-import { assert, assert_exists, assert_result, fallthrough, Res } from "./utils"
+import { assert, assert_result, Res } from "./utils"
 import { Equiv } from "./tag_map"
 
-type RealExpr = PrSat['RealExpr']
+// type RealExpr = PrSat['RealExpr']
 type Constraint = PrSat['Constraint']
 
 export const init_z3 = async (): Promise<Z3HighLevel & Z3LowLevel> => {

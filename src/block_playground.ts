@@ -325,6 +325,7 @@ export const generic_input_block = <ParseOutput extends {}>(
     copy_message_animation_timer = setTimeout(() => {
       copy_message_container.classList.remove('show')
       copy_button.disabled = false
+      clearTimeout(copy_message_animation_timer)
     }, 800)  // This value needs to align with animation-duration in .copy-message.show!
   }
 
