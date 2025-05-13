@@ -2,11 +2,12 @@ import { describe, expect, test } from "vitest"
 
 import { Random } from "./random"
 import { assert, assert_exists } from "./utils"
-import { a2eid, combine_inverse, constraint_builder, eliminate_state_variable_index_in_svs, evaluate_sentence, parse_s, random_letters_and_assignments, real_expr_to_smtlib, recursively_evaluate_sentence, SentenceFuzzer, state_from_index, translate_constraint, translate_real_expr, TruthTable } from "./pr_sat"
+import { evaluate_constraint_2, a2eid, combine_inverse, constraint_builder, eliminate_state_variable_index_in_svs, evaluate_real_expr, evaluate_real_expr_2, evaluate_sentence, parse_s, random_letters_and_assignments, real_expr_to_smtlib, real_expr_to_string, RealExprFuzzer, recursively_evaluate_sentence, SentenceFuzzer, state_from_index, translate_constraint, translate_real_expr, TruthTable, constraint_to_string, evaluate_constraint, ConstraintFuzzer } from "./pr_sat"
 import { PrSat, PrSatFuncs as PrSatUtils, SentenceMap } from "./types"
 
 type Sentence = PrSat['Sentence']
 type RealExpr = PrSat['RealExpr']
+type Constraint = PrSat['Constraint']
 
 const { letter, value, negation, conjunction, disjunction, conditional, biconditional } = PrSatUtils.inits.Sentence
 const val = (v: boolean) => value({ value: v })
@@ -433,5 +434,126 @@ describe('eliminate_state_variable_index_in_svs', () => {
     const subject_svs = svs({ indices: [0, 1, 2, 3, 4, 5, 6, 7] })
     const result = eliminate_state_variable_index_in_svs(7, inverted_redef, subject_svs)
     expect(result).toEqual(lit({ value: 1 }))
+  })
+})
+
+const random_state_values = (tt: TruthTable, random: Random): Record<number, number> => {
+  const state_values: Record<number, number> = {}
+  for (const state_index of tt.state_indices()) {
+    state_values[state_index] = random.float({ lower: -1000, upper: 1000 })
+  }
+  return state_values
+}
+
+const test_re_eval = (tt: TruthTable, state_values: Record<number, number>, expr: RealExpr) => {
+  test(real_expr_to_string(expr), () => {
+    const [status2, value2] = evaluate_real_expr_2(tt, state_values, expr)
+    try {
+      const value1 = evaluate_real_expr(tt, state_values, expr)
+      expect(value1).toEqual(value2)
+    } catch {
+      expect(status2).toBeFalsy()
+    }
+  })
+}
+
+const test_constraint_eval = (tt: TruthTable, state_values: Record<number, number>, constraint: Constraint) => {
+  test(constraint_to_string(constraint), () => {
+    const [status2, value2] = evaluate_constraint_2(tt, state_values, constraint)
+    try {
+      const value1 = evaluate_constraint(tt, state_values, constraint)
+      expect(value1).toEqual(value2)
+    } catch {
+      expect(status2).toBeFalsy()
+    }
+  })
+}
+
+describe('evaluate with state_values', () => {
+  const n_letters = 4
+  const random = new Random()
+  const [letters] = random_letters_and_assignments(random, n_letters)
+  const tt = make_tt(letters)
+
+  describe('with result', () => {
+    describe('real_expr', () => {
+      test('undeclared real variable', () => {
+        const e = vbl({ id: 'a' })
+        const tt = make_tt([letter({ id: 'A', index: 0 })])
+        const state_values = random_state_values(tt, random)
+        const [status, value] = evaluate_real_expr_2(tt, state_values, e)
+        expect(status).toBeFalsy()
+        expect(value).toEqual({ tag: 'undeclared-vars', vars: { real: [e.id], sentence: [] } })
+      })
+      test('declared sentence letter', () => {
+        const A = letter({ id: 'A', index: 0 })
+        const e = pr({ arg: A })
+        const tt = make_tt([A])
+        const state_values = random_state_values(tt, random)
+        const [status] = evaluate_real_expr_2(tt, state_values, e)
+        // A is declared because it is in the truth table.
+        expect(status).toBeTruthy()
+      })
+    })
+    describe('constraint', () => {
+      test('undeclared real variables (multiple)', () => {
+        const e = eq(vbl({ id: 'a' }), vbl({ id: 'b' }))
+        const state_values = random_state_values(tt, random)
+        const [status, value] = evaluate_constraint_2(tt, state_values, e)
+        expect(status).toBeFalsy()
+        expect(value).toEqual({ tag: 'undeclared-vars', vars: { real: ['a', 'b'], sentence: [] } })
+      })
+      test('declared sentence letters (multiple)', () => {
+        const A = letter({ id: 'A', index: 0 })
+        const B = letter({ id: 'B', index: 0 })
+        const e1 = pr({ arg: A })
+        const e2 = pr({ arg: B })
+        const c = eq(e1, e2)
+        const tt = make_tt([A, B])
+        const state_values = random_state_values(tt, random)
+        const [status] = evaluate_constraint_2(tt, state_values, c)
+        expect(status).toBeTruthy()
+      })
+      test('undeclared sentence letters (multiple)', () => {
+        const X = letter({ id: 'X', index: 0 })
+        const Y = letter({ id: 'Y', index: 0 })
+        const A = letter({ id: 'A', index: 0 })
+        const B = letter({ id: 'B', index: 0 })
+        const e1 = pr({ arg: A })
+        const e2 = pr({ arg: B })
+        const c = eq(e1, e2)
+        const tt = make_tt([X, Y])
+        const state_values = random_state_values(tt, random)
+        const [status, value] = evaluate_constraint_2(tt, state_values, c)
+        expect(status).toBeFalsy()
+        expect(value).toEqual({ tag: 'undeclared-vars', vars: { real: [], sentence: [A, B] } })
+      })
+    })
+  })
+  describe('fuzzed', () => {
+    const sentence_fuzzer = new SentenceFuzzer(random)
+    const real_expr_fuzzer = new RealExprFuzzer(random, sentence_fuzzer)
+    const constraint_fuzzer = new ConstraintFuzzer(random, sentence_fuzzer, real_expr_fuzzer)
+    const depth = 10
+    describe(`real_expr: ${random.seed_string}`, () => {
+      const n_examples = 100
+      const state_values = random_state_values(tt, random)
+
+      for (let example_index = 0; example_index < n_examples; example_index++) {
+        const example = real_expr_fuzzer.generate(letters, depth)
+        test_re_eval(tt, state_values, example)
+      }
+    })
+    describe(`constraint: ${random.seed_string}`, () => {
+      const n_examples = 100
+      const [letters] = random_letters_and_assignments(random, n_letters)
+      const tt = make_tt(letters)
+      const state_values = random_state_values(tt, random)
+
+      for (let example_index = 0; example_index < n_examples; example_index++) {
+        const example = constraint_fuzzer.generate(letters, depth)
+        test_constraint_eval(tt, state_values, example)
+      }
+    })
   })
 })

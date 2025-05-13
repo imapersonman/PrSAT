@@ -84,6 +84,7 @@ input[type=button] {
 input[type=button].generate {
   background-color: gainsboro;
   border-radius: 0.4em;
+  background-color:rgb(195, 228, 255);
 }
 
 input[type=button].options {
@@ -175,4 +176,32 @@ input::file-selector-button {
 .input-instructions {
   white-space: pre-wrap;
   margin-top: 0.4em;
+}
+
+.yields {
+  color:darkcyan;
+}
+
+.copy-message {
+  display: none;
+}
+
+/* https://stackoverflow.com/questions/11660710/css-transition-fade-in */
+.copy-message.show {
+  display: inline;
+  opacity: 0;
+
+  animation-name: fadeInOpacity;
+  animation-iteration-count: 1;
+  animation-timing-function: ease-out;
+  animation-duration: 0.8s;
+}
+
+@keyframes fadeInOpacity {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }

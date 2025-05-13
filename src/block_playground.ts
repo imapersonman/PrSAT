@@ -290,7 +290,9 @@ export const generic_input_block = <ParseOutput extends {}>(
 
   const file_loader = el('input', { type: 'file', style: 'display: none;' }) as HTMLInputElement
   const load_button = button('Load From File', { style: 'margin-right: 0.4em;' })
-  const save_button = button('Save Constraints to File', { style: 'margin-top: 0.4em;' })
+  const save_button = button('Save to File')
+  const copy_button = button('Copy to Clipboard', { style: 'margin-left: 0.4em;' })
+  const copy_message_container = el('span', { style: 'margin-left: 0.4em;', class: 'copy-message' }, 'Copied Constraints!')
   const show_batch_button = button('')
 
   const show_batch_block = new Editable(true)
@@ -315,6 +317,17 @@ export const generic_input_block = <ParseOutput extends {}>(
     download(combined_fields, 'constraints.txt', 'text/plain')
   }
 
+  let copy_message_animation_timer: ReturnType<typeof setTimeout> | undefined = undefined
+  copy_button.onclick = async () => {
+    await navigator.clipboard.writeText(batch_logic.text.get())
+    copy_message_container.classList.add('show')
+    copy_button.disabled = true
+    copy_message_animation_timer = setTimeout(() => {
+      copy_message_container.classList.remove('show')
+      copy_button.disabled = false
+    }, 800)  // This value needs to align with animation-duration in .copy-message.show!
+  }
+
   file_loader.onchange = async () => {
     const files = assert_exists(file_loader.files, 'file_loader.files is null!')
     assert(files.length === 1, `Number of files in file_loader != 1!\nactually: ${files.length}`)
@@ -333,7 +346,9 @@ export const generic_input_block = <ParseOutput extends {}>(
       batch_block.element,
     ),
     split_block.element,
-    save_button,
+    el('div', { style: 'margin-top: 0.4em;' },
+      save_button,
+      el('span', {}, copy_button, copy_message_container)),
   )
   return {
     element,

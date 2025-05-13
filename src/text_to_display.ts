@@ -1,10 +1,10 @@
 import { Context } from "z3-solver";
 import { Editable, rEditable } from './editable';
 import { el, math_el, tel } from "./el";
-import { assert, assert_exists } from "./utils";
+import { assert, assert_exists, fallthrough, Res } from "./utils";
 import { parse_constraint, parse_constraint_or_real_expr } from "./parser";
-import { TruthTable, variables_in_constraints } from "./pr_sat";
-import { evaluate_constraint, evaluate_real_expr, init_z3, ModelAssignmentOutput, pr_sat_with_truth_table } from "./z3_integration";
+import { evaluate_constraint, evaluate_constraint_2, evaluate_real_expr, evaluate_real_expr_2, EvaluationError, sentence_to_string, TruthTable, VariableLists, variables_in_constraints } from "./pr_sat";
+import { init_z3, ModelAssignmentOutput, pr_sat_with_truth_table } from "./z3_integration";
 import { s_to_string } from "./s";
 import { ConstraintOrRealExpr, PrSat } from "./types";
 import { Equiv } from "./tag_map";
@@ -728,11 +728,11 @@ const display_constraint_or_real_expr = (e: ConstraintOrRealExpr, wrap_in_math_e
   }
 }
 
-const evaluate_constraint_or_real_expr = (tt: TruthTable, state_values: Record<number, number>, e: ConstraintOrRealExpr): boolean | number => {
+const evaluate_constraint_or_real_expr = (tt: TruthTable, state_values: Record<number, number>, e: ConstraintOrRealExpr): Res<boolean | number, EvaluationError> => {
   if (e.tag === 'constraint') {
-    return evaluate_constraint(tt, state_values, e.constraint)
+    return evaluate_constraint_2(tt, state_values, e.constraint)
   } else if (e.tag === 'real_expr') {
-    return evaluate_real_expr(tt, state_values, e.real_expr)
+    return evaluate_real_expr_2(tt, state_values, e.real_expr)
   } else {
     const check: Equiv<typeof e, never> = true
     void check
@@ -752,6 +752,38 @@ const value_to_string = (value: boolean | number): string => {
   }
 }
 
+const undeclared_variables_string = (vlists: VariableLists): string => {
+  let result = 'Undeclared variables: '
+  if (vlists.real.length === 0 && vlists.sentence.length === 0) {
+    return 'Undeclared variables!'
+  }
+
+  if (vlists.real.length > 0) {
+    result += vlists.real.join(', ')
+    if (vlists.sentence.length > 0) {
+      result += ', '
+    }
+  }
+  if (vlists.sentence.length > 0) {
+    result += vlists.sentence.map(sentence_to_string).join(', ')
+  }
+
+  return result
+}
+
+const constraint_to_real_expr_result_to_html = (e: Res<boolean | number, EvaluationError>): Element => {
+  const [status, value] = e
+  if (status) {
+    return math_el('mtext', {}, value_to_string(value))
+  } else if (value.tag === 'div0') {
+    return math_el('mtext', { class: 'error' }, 'Division by 0!')
+  } else if (value.tag === 'undeclared-vars') {
+    return math_el('mtext', { class: 'error' }, undeclared_variables_string(value.vars))
+  } else {
+    return fallthrough('constraint_to_real_expr_result_to_html', value)
+  }
+}
+
 type ModelEvaluator = {
   element: HTMLElement
   // multi_input: MultiInput<ConstraintOrRealExpr>
@@ -766,11 +798,12 @@ const model_evaluators = (model_assignments: rEditable<{ truth_table: TruthTable
       return d
     } else {
       // Weird that we're evaluating in a display function but I don't care.
-      const value = evaluate_constraint_or_real_expr(assignments.truth_table, assignments.values, e)
-      return el('div', { style: 'display: flex;' },
+      const result = evaluate_constraint_or_real_expr(assignments.truth_table, assignments.values, e)
+      const result_html = constraint_to_real_expr_result_to_html(result)
+      return math_el('math', {},
         d,
-        el('span', { style: 'margin-left: 0.4em; margin-right: 0.4em;' }, '⟾'),
-        value_to_string(value))
+        math_el('mo', { class: 'yields' }, '⟾'),
+        result_html)
     }
   }
 
@@ -823,10 +856,11 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
   // const options_button = el('input', { type: 'button', value: '⚙', class: 'options' }) as HTMLButtonElement
   const z3_status_container = tel(TestId.z3_status, 'div', { style: 'margin-left: 0.4em;' })
   const is_regular = new Editable(false)
-  const regular_toggle = tel(TestId.regular_toggle, 'input', { type: 'checkbox' }, 'Regular') as HTMLInputElement
+  const regular_toggle = tel(TestId.regular_toggle, 'input', { type: 'checkbox', style: 'margin-left: 0.4em;' }, 'Regular') as HTMLInputElement
   const z3_state = new Editable<Z3ContextState>({ tag: 'loading' })
   const generate_line = el('div', { style: 'display: flex;' },
     generate_button,
+    // el('input', { type: 'button', value: Constants.FIND_MODEL_BUTTON_LABEL, class: 'generate' }) as HTMLButtonElement,
     // options_button,
     el('label', {},
       regular_toggle,

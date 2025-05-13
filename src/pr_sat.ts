@@ -1,5 +1,5 @@
 import { Random } from "./random"
-import { assert, assert_exists, include_exclude_set } from "./utils"
+import { assert, assert_exists, fallthrough, include_exclude_set, Res } from "./utils"
 
 type Sentence = PrSat['Sentence']
 type RealExpr = PrSat['RealExpr']
@@ -93,6 +93,15 @@ class LetterSet {
     } else {
       return false
     }
+  }
+
+  is_empty(): boolean {
+    return this.underlying_map.size <= 0
+  }
+
+  diff(other: LetterSet): LetterSet {
+    const diff_arr = this.all_letters.filter((l) => !other.has(l))
+    return new LetterSet(diff_arr)
   }
 }
 
@@ -1131,26 +1140,6 @@ export const translate_real_expr = (tt: TruthTable, expr: RealExpr): RealExpr =>
     const td = translate_real_expr(tt, expr.denominator)
     return { tag: 'divide', numerator: tn, denominator: td }
   } else if (expr.tag === 'power') {
-    // const tb = translate_real_expr(tt, expr.base)
-    // if (expr.exponent.tag !== 'literal') {
-    //   throw new Error('Expected power to have a literal exponent!')
-    // }
-    // assert(Number.isInteger(expr.exponent.value), 'Power exponent is not an integer!')
-    // if (expr.exponent.value === 0) {
-    //   return { tag: 'literal', value: 1 }
-    // }
-
-    // const pos_exp = Math.abs(expr.exponent.value)
-    // let current_expr = tb
-    // for (let ei = 0; ei < pos_exp; ei++) {
-    //   current_expr = { tag: 'multiply', left: tb, right: current_expr }
-    // }
-
-    // if (expr.exponent.value > 0) {
-    //   return current_expr
-    // } else {
-    //   return { tag: 'divide', numerator: { tag: 'literal', value: 1 }, denominator: current_expr }
-    // }
     const tb = translate_real_expr(tt, expr.base)
     const te = translate_real_expr(tt, expr.exponent)
     return { tag: 'power', base: tb, exponent: te }
@@ -1462,4 +1451,387 @@ export class ConstraintFuzzer {
     const gen = make_generator(fs)
     return gen(this.random, depth)
   }
+}
+
+const tolerance = 0.00000000000001
+
+// state_values: Record<StateIndex, Value>
+export const evaluate_constraint = (tt: TruthTable, state_values: Record<number, number>, constraint: Constraint): boolean => {
+  if (constraint.tag === 'equal') {
+    // return evaluate_real_expr(state_value_array, constraint.left) === evaluate_real_expr(state_value_array, constraint.right)
+    return Math.abs(evaluate_real_expr(tt, state_values, constraint.left) - evaluate_real_expr(tt, state_values, constraint.right)) <= tolerance
+  } else if (constraint.tag === 'not_equal') {
+    // return evaluate_real_expr(state_value_array, constraint.left) !== evaluate_real_expr(state_value_array, constraint.right)
+    return Math.abs(evaluate_real_expr(tt, state_values, constraint.left) - evaluate_real_expr(tt, state_values, constraint.right)) > tolerance
+  } else if (constraint.tag === 'less_than') {
+    return evaluate_real_expr(tt, state_values, constraint.left) < evaluate_real_expr(tt, state_values, constraint.right)
+  } else if (constraint.tag === 'less_than_or_equal') {
+    return evaluate_real_expr(tt, state_values, constraint.left) <= evaluate_real_expr(tt, state_values, constraint.right)
+  } else if (constraint.tag === 'greater_than') {
+    return evaluate_real_expr(tt, state_values, constraint.left) > evaluate_real_expr(tt, state_values, constraint.right)
+  } else if (constraint.tag === 'greater_than_or_equal') {
+    return evaluate_real_expr(tt, state_values, constraint.left) >= evaluate_real_expr(tt, state_values, constraint.right)
+  } else if (constraint.tag === 'negation') {
+    return !evaluate_constraint(tt, state_values, constraint.constraint)
+  } else if (constraint.tag === 'conjunction') {
+    return evaluate_constraint(tt, state_values, constraint.left) && evaluate_constraint(tt, state_values, constraint.right)
+  } else if (constraint.tag === 'disjunction') {
+    return evaluate_constraint(tt, state_values, constraint.left) || evaluate_constraint(tt, state_values, constraint.right)
+  } else if (constraint.tag === 'conditional') {
+    return !evaluate_constraint(tt, state_values, constraint.left) || evaluate_constraint(tt, state_values, constraint.right)
+  } else if (constraint.tag === 'biconditional') {
+    return evaluate_constraint(tt, state_values, constraint.left) === evaluate_constraint(tt, state_values, constraint.right)
+  } else {
+    throw new Error('evaluate_constraint fallthrough')
+  }
+}
+
+// state_values: Record<StateIndex, Value>
+export const evaluate_constraint_2 = (tt: TruthTable, state_values: Record<number, number>, constraint: Constraint): Res<boolean, EvaluationError> => {
+  if (constraint.tag === 'equal') {
+    // return Math.abs(evaluate_real_expr(tt, state_values, constraint.left) - evaluate_real_expr(tt, state_values, constraint.right)) <= tolerance
+    return combine_eval_results(
+      evaluate_real_expr_2(tt, state_values, constraint.left),
+      evaluate_real_expr_2(tt, state_values, constraint.right),
+      (l, r) => [true, Math.abs(l - r) <= tolerance],
+    )
+  } else if (constraint.tag === 'not_equal') {
+    // return Math.abs(evaluate_real_expr(tt, state_values, constraint.left) - evaluate_real_expr(tt, state_values, constraint.right)) > tolerance
+    return combine_eval_results(
+      evaluate_real_expr_2(tt, state_values, constraint.left),
+      evaluate_real_expr_2(tt, state_values, constraint.right),
+      (l, r) => [true, Math.abs(l - r) > tolerance],
+    )
+  } else if (constraint.tag === 'less_than') {
+    // return evaluate_real_expr(tt, state_values, constraint.left) < evaluate_real_expr(tt, state_values, constraint.right)
+    return combine_eval_results(
+      evaluate_real_expr_2(tt, state_values, constraint.left),
+      evaluate_real_expr_2(tt, state_values, constraint.right),
+      (l, r) => [true, l < r],
+    )
+  } else if (constraint.tag === 'less_than_or_equal') {
+    // return evaluate_real_expr(tt, state_values, constraint.left) <= evaluate_real_expr(tt, state_values, constraint.right)
+    return combine_eval_results(
+      evaluate_real_expr_2(tt, state_values, constraint.left),
+      evaluate_real_expr_2(tt, state_values, constraint.right),
+      (l, r) => [true, l <= r],
+    )
+  } else if (constraint.tag === 'greater_than') {
+    // return evaluate_real_expr(tt, state_values, constraint.left) > evaluate_real_expr(tt, state_values, constraint.right)
+    return combine_eval_results(
+      evaluate_real_expr_2(tt, state_values, constraint.left),
+      evaluate_real_expr_2(tt, state_values, constraint.right),
+      (l, r) => [true, l > r],
+    )
+  } else if (constraint.tag === 'greater_than_or_equal') {
+    // return evaluate_real_expr(tt, state_values, constraint.left) >= evaluate_real_expr(tt, state_values, constraint.right)
+    return combine_eval_results(
+      evaluate_real_expr_2(tt, state_values, constraint.left),
+      evaluate_real_expr_2(tt, state_values, constraint.right),
+      (l, r) => [true, l >= r],
+    )
+  } else if (constraint.tag === 'negation') {
+    // return !evaluate_constraint(tt, state_values, constraint.constraint)
+    return map_eval_result(
+      evaluate_constraint_2(tt, state_values, constraint.constraint),
+      (v) => [true, !v],
+    )
+  } else if (constraint.tag === 'conjunction') {
+    // return evaluate_constraint(tt, state_values, constraint.left) && evaluate_constraint(tt, state_values, constraint.right)
+    return combine_eval_results(
+      evaluate_constraint_2(tt, state_values, constraint.left),
+      evaluate_constraint_2(tt, state_values, constraint.right),
+      (l, r) => [true, l && r],
+    )
+  } else if (constraint.tag === 'disjunction') {
+    // return evaluate_constraint(tt, state_values, constraint.left) || evaluate_constraint(tt, state_values, constraint.right)
+    return combine_eval_results(
+      evaluate_constraint_2(tt, state_values, constraint.left),
+      evaluate_constraint_2(tt, state_values, constraint.right),
+      (l, r) => [true, l || r],
+    )
+  } else if (constraint.tag === 'conditional') {
+    // return !evaluate_constraint(tt, state_values, constraint.left) || evaluate_constraint(tt, state_values, constraint.right)
+    return combine_eval_results(
+      evaluate_constraint_2(tt, state_values, constraint.left),
+      evaluate_constraint_2(tt, state_values, constraint.right),
+      (l, r) => [true, !l || r],
+    )
+  } else if (constraint.tag === 'biconditional') {
+    // return evaluate_constraint(tt, state_values, constraint.left) === evaluate_constraint(tt, state_values, constraint.right)
+    return combine_eval_results(
+      evaluate_constraint_2(tt, state_values, constraint.left),
+      evaluate_constraint_2(tt, state_values, constraint.right),
+      (l, r) => [true, l === r],
+    )
+  } else {
+    throw new Error('evaluate_constraint fallthrough')
+  }
+}
+
+const map_at = <Key extends number | string | symbol, Value>(map: Record<Key, Value>, key: Key): Value => {
+  return assert_exists(map[key], `Map at key '${key.toString()}' missing!`)
+}
+
+// state_values: Record<StateIndex, Value>
+export const evaluate_real_expr = (tt: TruthTable, state_values: Record<number, number>, expr: RealExpr): number => {
+  if (expr.tag === 'literal') {
+    return expr.value
+  } else if (expr.tag === 'variable') {
+    throw new Error('not evaluating real variables yet!')
+  } else if (expr.tag === 'probability') {
+    return evaluate_real_expr(tt, state_values, translate_real_expr(tt, expr))
+  } else if (expr.tag === 'given_probability') {
+    return evaluate_real_expr(tt, state_values, translate_real_expr(tt, expr))
+  } else if (expr.tag === 'state_variable_sum') {
+    return expr.indices.map((i) => map_at(state_values, i)).reduce((a, b) => a + b, 0)
+  } else if (expr.tag === 'negative') {
+    return -evaluate_real_expr(tt, state_values, expr.expr)
+  } else if (expr.tag === 'power') {
+    return Math.pow(evaluate_real_expr(tt, state_values, expr.base), evaluate_real_expr(tt, state_values, expr.exponent))
+  } else if (expr.tag === 'plus') {
+    return evaluate_real_expr(tt, state_values, expr.left) + evaluate_real_expr(tt, state_values, expr.right)
+  } else if (expr.tag === 'minus') {
+    return evaluate_real_expr(tt, state_values, expr.left) - evaluate_real_expr(tt, state_values, expr.right)
+  } else if (expr.tag === 'multiply') {
+    return evaluate_real_expr(tt, state_values, expr.left) * evaluate_real_expr(tt, state_values, expr.right)
+  } else if (expr.tag === 'divide') {
+    return evaluate_real_expr(tt, state_values, expr.numerator) / evaluate_real_expr(tt, state_values, expr.denominator)
+  } else {
+    return fallthrough('evaluate_real_expr', expr)
+  }
+}
+
+export type EvaluationError =
+  | { tag: 'div0' } 
+  | { tag: 'undeclared-vars', vars: VariableLists }
+
+const combine_eval_results = <T, R>(r1: Res<T, EvaluationError>, r2: Res<T, EvaluationError>, f: (t1: T, t2: T) => Res<R, EvaluationError>): Res<R, EvaluationError> => {
+  const [status1, value1] = r1
+  const [status2, value2] = r2
+
+  if (status1 && status2) {
+    return f(value1, value2)
+  } else if (status1 && !status2) {
+    return [false, value2]
+  } else if (!status1 && status2) {
+    return [false, value1]
+  } else if (!status1 && !status2) {
+    if (value1.tag === 'undeclared-vars' && value2.tag === 'undeclared-vars') {
+      return [false, { tag: 'undeclared-vars', vars: { real: [...value1.vars.real, ...value2.vars.real], sentence: [...value1.vars.sentence, ...value2.vars.sentence] } }]
+    } else if (value1.tag === 'div0') {
+      return r1
+    } else {
+      return r2
+    }
+  } else {
+    throw new Error('combine_eval_results fallthrough')
+  }
+}
+
+const map_eval_result = <T>(r: Res<T, EvaluationError>, f: (t: T) => Res<T, EvaluationError>): Res<T, EvaluationError> => {
+  const [status, value] = r
+  if (status) {
+    return f(value)
+  } else {
+    return r
+  }
+}
+
+const free_sentence_variables = (s: Sentence, set: LetterSet): LetterSet => {
+  const sub = (s: Sentence): void => {
+    if (s.tag === 'biconditional') {
+      sub(s.left)
+      sub(s.right)
+    } else if (s.tag === 'conditional') {
+      sub(s.left)
+      sub(s.right)
+    } else if (s.tag === 'conjunction') {
+      sub(s.left)
+      sub(s.right)
+    } else if (s.tag === 'disjunction') {
+      sub(s.left)
+      sub(s.right)
+    } else if (s.tag === 'letter') {
+      set.add(s)
+    } else if (s.tag === 'negation') {
+      sub(s.sentence)
+    } else if (s.tag === 'value') {
+      // nothing!
+    } else {
+      return fallthrough('free_sentence_variables', s)
+    }
+  }
+
+  sub(s)
+  return set
+}
+
+const free_sentence_variables_in_real_expr = (expr: RealExpr, set: LetterSet): LetterSet => {
+  const sub = (expr: RealExpr): void => {
+    if (expr.tag === 'divide') {
+      sub(expr.numerator)
+      sub(expr.denominator)
+    } else if (expr.tag === 'given_probability') {
+      free_sentence_variables(expr.arg, set)
+      free_sentence_variables(expr.given, set)
+    } else if (expr.tag === 'literal') {
+      // nothing!
+    } else if (expr.tag === 'minus') {
+      sub(expr.left)
+      sub(expr.right)
+    } else if (expr.tag === 'multiply') {
+      sub(expr.left)
+      sub(expr.right)
+    } else if (expr.tag === 'negative') {
+      sub(expr.expr)
+    } else if (expr.tag === 'plus') {
+      sub(expr.left)
+      sub(expr.right)
+    } else if (expr.tag === 'power') {
+      sub(expr.base)
+      sub(expr.exponent)
+    } else if (expr.tag === 'probability') {
+      free_sentence_variables(expr.arg, set)
+    } else if (expr.tag === 'state_variable_sum') {
+      // nothing!
+    } else if (expr.tag === 'variable') {
+      // nothing!
+    } else {
+      return fallthrough('free_sentence_variables_in_real_expr', expr)
+    }
+  }
+
+  sub(expr)
+  return set
+}
+
+const free_sentence_variables_in_constraint = (c: Constraint, set: LetterSet): LetterSet => {
+  const sub = (c: Constraint): void => {
+    if (c.tag === 'biconditional') {
+      sub(c.left)
+      sub(c.right)
+    } else if (c.tag === 'conditional') {
+      sub(c.left)
+      sub(c.right)
+    } else if (c.tag === 'conjunction') {
+      sub(c.left)
+      sub(c.right)
+    } else if (c.tag === 'disjunction') {
+      sub(c.left)
+      sub(c.right)
+    } else if (c.tag === 'equal') {
+      free_sentence_variables_in_real_expr(c.left, set)
+      free_sentence_variables_in_real_expr(c.right, set)
+    } else if (c.tag === 'greater_than') {
+      free_sentence_variables_in_real_expr(c.left, set)
+      free_sentence_variables_in_real_expr(c.right, set)
+    } else if (c.tag === 'greater_than_or_equal') {
+      free_sentence_variables_in_real_expr(c.left, set)
+      free_sentence_variables_in_real_expr(c.right, set)
+    } else if (c.tag === 'less_than') {
+      free_sentence_variables_in_real_expr(c.left, set)
+      free_sentence_variables_in_real_expr(c.right, set)
+    } else if (c.tag === 'less_than_or_equal') {
+      free_sentence_variables_in_real_expr(c.left, set)
+      free_sentence_variables_in_real_expr(c.right, set)
+    } else if (c.tag === 'negation') {
+      sub(c.constraint)
+    } else if (c.tag === 'not_equal') {
+      free_sentence_variables_in_real_expr(c.left, set)
+      free_sentence_variables_in_real_expr(c.right, set)
+    } else {
+      return fallthrough('free_sentence_variables_in_constraint', c)
+    }
+  }
+
+  return set
+}
+
+// state_values: Record<StateIndex, Value>
+export const evaluate_real_expr_2 = (tt: TruthTable, state_values: Record<number, number>, expr: RealExpr): Res<number, EvaluationError> => {
+  const sub = (expr: RealExpr): Res<number, EvaluationError> => {
+    if (expr.tag === 'literal') {
+      return [true, expr.value]
+    } else if (expr.tag === 'variable') {
+      // throw new Error('not evaluating real variables yet!')
+      return [false, { tag: 'undeclared-vars', vars: { real: [expr.id], sentence: [] } }]
+    } else if (expr.tag === 'probability') {
+      const translated = translate_real_expr(tt, expr)
+      return evaluate_real_expr_2(tt, state_values, translated)
+    } else if (expr.tag === 'given_probability') {
+      return evaluate_real_expr_2(tt, state_values, translate_real_expr(tt, expr))
+    } else if (expr.tag === 'state_variable_sum') {
+      return [true, expr.indices.map((i) => map_at(state_values, i)).reduce((a, b) => a + b, 0)]
+    } else if (expr.tag === 'negative') {
+      // return -evaluate_real_expr(tt, state_values, expr.expr)
+      return map_eval_result(evaluate_real_expr_2(tt, state_values, expr.expr), (v) => [true, -v])
+    } else if (expr.tag === 'power') {
+      // return Math.pow(evaluate_real_expr(tt, state_values, expr.base), evaluate_real_expr(tt, state_values, expr.exponent))
+      return combine_eval_results(
+        evaluate_real_expr_2(tt, state_values, expr.base),
+        evaluate_real_expr_2(tt, state_values, expr.exponent),
+        (base, exponent) => [true, Math.pow(base, exponent)],
+      )
+    } else if (expr.tag === 'plus') {
+      // return evaluate_real_expr(tt, state_values, expr.left) + evaluate_real_expr(tt, state_values, expr.right)
+      return combine_eval_results(
+        evaluate_real_expr_2(tt, state_values, expr.left),
+        evaluate_real_expr_2(tt, state_values, expr.right),
+        (l, r) => [true, l + r],
+      )
+    } else if (expr.tag === 'minus') {
+      // return evaluate_real_expr(tt, state_values, expr.left) - evaluate_real_expr(tt, state_values, expr.right)
+      return combine_eval_results(
+        evaluate_real_expr_2(tt, state_values, expr.left),
+        evaluate_real_expr_2(tt, state_values, expr.right),
+        (l, r) => [true, l - r],
+      )
+    } else if (expr.tag === 'multiply') {
+      // return evaluate_real_expr(tt, state_values, expr.left) * evaluate_real_expr(tt, state_values, expr.right)
+      return combine_eval_results(
+        evaluate_real_expr_2(tt, state_values, expr.left),
+        evaluate_real_expr_2(tt, state_values, expr.right),
+        (l, r) => [true, l * r],
+      )
+    } else if (expr.tag === 'divide') {
+      // return evaluate_real_expr(tt, state_values, expr.numerator) / evaluate_real_expr(tt, state_values, expr.denominator)
+      return combine_eval_results(
+        evaluate_real_expr_2(tt, state_values, expr.numerator),
+        evaluate_real_expr_2(tt, state_values, expr.denominator),
+        (n, d) => {
+          if (d === 0) {
+            return [false, { tag: 'div0' }]
+          } else {
+            return [true, n / d]
+          }
+        },
+      )
+    } else {
+      return fallthrough('evaluate_real_expr', expr)
+    }
+  }
+
+  const vars = free_sentence_variables_in_real_expr(expr, new LetterSet([]))
+  const fvs = vars.diff(new LetterSet([...tt.letters()]))
+  const result = sub(expr)
+  const [status, value] = result
+  if (status) {
+    if (!fvs.is_empty()) {
+      return [false, { tag: 'undeclared-vars', vars: { real: [], sentence: [...fvs] } }]
+    } else {
+      return [status, value]
+    }
+  } else {
+    if (value.tag === 'div0') {
+      return result
+    } else {
+      return [false, { tag: 'undeclared-vars', vars: { real: value.vars.real, sentence: [...fvs] } }]
+    }
+  }
+  // return sub(expr)
+}
+
+export const validate_model = (constraints: Constraint[], state_values: Record<number, number>, tt: TruthTable): boolean[] => {
+  return constraints.map((c) => evaluate_constraint(tt, state_values, c))
 }
