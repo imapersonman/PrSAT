@@ -151,6 +151,6 @@ const sentence_to_html = (s: Sentence): MathMLElement => {
   } else {
     const connectives = assert_exists(possible_sentence_connectives[s.tag])
     const op = math_el('mo', {}, assert_exists(connectives[0]))
-    return math_el('mrow', {}, wrap(s.left, ['negation', 'letter', 'value']), op, wrap(s.right, ['negation', 'letter', 'conjunction', 'value']))
+    return math_el('mrow', {}, wrap(s.left, ['negation', 'letter', 'value']), op, wrap(s.right, ['negation', 'letter', 'value']))
   }
 }
