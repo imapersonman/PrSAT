@@ -3,7 +3,7 @@ import { Editable, rEditable } from './editable';
 import { el, math_el, tel } from "./el";
 import { assert, assert_exists, fallthrough, Res } from "./utils";
 import { parse_constraint, parse_constraint_or_real_expr } from "./parser";
-import { evaluate_constraint_2, evaluate_real_expr_2, EvaluationError, sentence_to_string, TruthTable, VariableLists, variables_in_constraints } from "./pr_sat";
+import { constraint_to_string, evaluate_constraint_2, evaluate_real_expr_2, EvaluationError, sentence_to_string, TruthTable, VariableLists, variables_in_constraints } from "./pr_sat";
 import { init_z3, ModelAssignmentOutput, pr_sat_with_truth_table } from "./z3_integration";
 import { s_to_string } from "./s";
 import { ConstraintOrRealExpr, PrSat } from "./types";
@@ -869,6 +869,7 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
     z3_status_container)
 
   const set_all_constraints = (all_constraints: Constraint[] | undefined) => {
+    console.log('on_ready', all_constraints?.map(constraint_to_string))
     invalidate()
     if (all_constraints === undefined) {
       generate_button.disabled = true
@@ -983,7 +984,6 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
 
   state.watch((state) => {
     // Logic
-    console.log('state set!', state.tag)
     if (state.tag === 'sat') {
       model_assignments.set({ truth_table: state.truth_table, values: state.state_values })
       // evaluators.multi_input.refresh()

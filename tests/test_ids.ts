@@ -4,7 +4,7 @@ const test_id_generator = (prefix: string): TestIdGenerator => {
   let current = 0
   return {
     prefix,
-    gen: () => { console.log("ahsdladhjasldhualkjdn"); return `${prefix}-${current++}` },
+    gen: () => `${prefix}-${current++}`,
     get: (index: number) => `${prefix}-${index}`,
   }
 }

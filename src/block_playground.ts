@@ -92,7 +92,6 @@ export const split_input = <ParseOutput extends {}>(
     if (event.key === 'Enter') {
       const cursor_position = assert_exists(textbox.selectionEnd, 'While trying to get cursor position, ArrowUp event called when textbox not focused')
       const [first_part, second_part] = split_at_position(textbox.value, cursor_position)  // using textbox value because text might be out of date because of debouncing!
-      console.log(first_part, second_part)
       const next = logic.then_insert()
       next.text.set(second_part)
       logic.text.set(first_part)
@@ -256,7 +255,6 @@ const batch_input_block = <ParseOutput extends {}>(
 
   textbox.addEventListener('input', debounce(DEFAULT_DEBOUNCE_MS, {
     trail: () => {
-      console.log('update')
       batch_logic.text.set(textbox.value)
     },
   }))

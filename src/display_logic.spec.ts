@@ -481,7 +481,7 @@ describe('display logic', () => {
       expect(block.n_inputs()).toEqual(3)
     })
     test('emptying one out of a bunch of parseables', () => {
-      const block = new InputBlockLogic(parse_constraint, () => undefined)
+      const block = make_block()
       const on_ready = watch_f((_: Constraint[] | undefined) => {})
       block.on_ready(on_ready.f)
       block.set_fields([
@@ -499,6 +499,34 @@ describe('display logic', () => {
         eq(lit(2), lit(2)),
       ], count: 8 })  // 8 updates is horrible!
       expect(block.n_inputs()).toEqual(3)
+    })
+    test('removing constraint calls on-ready', () => {
+      const block = make_block()
+      const on_ready = watch_f((_: Constraint[] | undefined) => {})
+      block.on_ready(on_ready.f)
+
+      const input0 = block.insert_input_after()
+      const input1 = input0.then_insert()
+      const input2 = input1.then_insert()
+
+      input0.text.set('0 = 0')
+      input1.text.set('1 = 1')
+      input2.text.set('2 = 2')
+
+      expect(on_ready.calls).toEqual({ tag: 'called-with', input: [
+        eq(lit(0), lit(0)),
+        eq(lit(1), lit(1)),
+        eq(lit(2), lit(2)),
+      ], count: 3 })
+
+      input1.remove()
+
+      expect(on_ready.calls).toEqual({ tag: 'called-with', input: [
+        eq(lit(0), lit(0)),
+        eq(lit(2), lit(2)),
+      ], count: 4 })
+
+      expect(block.n_inputs()).toEqual(2)
     })
   })
 

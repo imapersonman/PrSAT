@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
-import { constraint_builder, parse_s, real_expr_builder, sentence_builder } from './pr_sat'
-import { init_z3, model_assignment_output_to_string, ModelAssignmentOutput, pr_sat } from './z3_integration'
+import { constraint_builder, parse_s, real_expr_builder, sentence_builder, TruthTable, variables_in_constraints } from './pr_sat'
+import { init_z3, model_assignment_output_to_string, ModelAssignmentOutput, pr_sat, pr_sat_with_options } from './z3_integration'
 import { PrSat } from './types'
 import { S, s_to_string } from './s'
 
@@ -416,11 +416,24 @@ describe('z3', () => {
         const { status: sat, model: _ } = await pr_sat(Context('main'), constraints)
         expect(sat).toEqual('unsat')
       })
-      test.skip('s', async () => {
-        const { Context } = await init_z3()
-        const constraints = desideratum(sk)
-        const { status: sat, model: _ } = await pr_sat(Context('main'), constraints)
-        expect(sat).toEqual('sat')
+      describe('s (which takes too long so we\'re testing timing stuff)', () => {
+        test.skip('by itself', async () => {
+          const { Context } = await init_z3()
+          const constraints = desideratum(sk)
+          const { status: sat, model: _ } = await pr_sat(Context('main'), constraints)
+          expect(sat).toEqual('sat')
+        })
+        test('with timeout', async () => {
+          const { Context } = await init_z3()
+          const constraints = desideratum(sk)
+          const start = performance.now()
+          const tt = new TruthTable(variables_in_constraints(constraints))
+          const timeout_ms = 5_000
+          const { status: sat, model: _ } = await pr_sat_with_options(Context('main'), tt, constraints, { timeout_ms })
+          const end = performance.now()
+          expect(sat).toEqual('unknown')
+          expect(end - start).toBeLessThan(timeout_ms + 500)
+        })
       })
     })
   })

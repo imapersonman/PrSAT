@@ -236,13 +236,8 @@ export class InputBlockLogic<ParseOutput extends {}, Associate = undefined> {
       return undefined
     }
 
-    const old_state = to_remove.get_output()
     this.inputs.remove(to_remove)
-
-    if (old_state.tag === 'error') {
-      // Removing the error might cause the others to be find so let's call it again!
-      this.update_outputs()
-    }
+    this.update_outputs()
 
     return replacement
   }

@@ -305,14 +305,33 @@ export const model_to_assignments = async <CtxKey extends string>(ctx: Context<C
 //   }
 // }
 
-export const pr_sat_with_truth_table = async <CtxKey extends string>(
+export type SolverOptions = {
+  regular: boolean
+  timeout_ms: number
+}
+
+export type SolverReturn =
+  | { status: 'sat', all_constraints: Constraint[], tt: TruthTable, state_values: Record<number, number>, model: Record<number, ModelAssignmentOutput> }
+  | { status: 'unsat' | 'unknown', all_constraints: Constraint[], tt: TruthTable, state_values: Record<number, number>, model: undefined }
+
+const DEFAULT_SOLVER_OPTIONS: SolverOptions = {
+  regular: false,
+  timeout_ms: 30_000,
+}
+
+// const fill_solver_options = (defaults: SolverOptions, partial: Partial<SolverOptions> | undefined): SolverOptions =>
+//   ({ ...defaults, ...partial })
+
+export const pr_sat_with_options = async <CtxKey extends string>(
   ctx: Context<CtxKey>,
   tt: TruthTable,
   constraints: Constraint[],
-  regular: boolean = false,
-): Promise<{ status: 'sat', all_constraints: Constraint[], tt: TruthTable, state_values: Record<number, number>, model: Record<number, ModelAssignmentOutput> } | { status: 'unsat' | 'unknown', all_constraints: Constraint[], tt: TruthTable, state_values: Record<number, number>, model: undefined }> => {
+  options?: Partial<SolverOptions>,
+): Promise<SolverReturn> => {
+  const { regular, timeout_ms } = { ...DEFAULT_SOLVER_OPTIONS, ...options }
   const { Solver } = ctx
   const solver = new Solver();
+  solver.set("timeout", timeout_ms)
 
   const translated = translate(tt, constraints)
   const index_to_eliminate = tt.n_states() - 1  // Only this works right now!
@@ -350,7 +369,6 @@ export const pr_sat_with_truth_table = async <CtxKey extends string>(
     next_solver_commands.push(['declare-const', `s_${index_to_eliminate}`, 'Real'])
     next_solver_commands.push(['assert', ['=', `s_${index_to_eliminate}`, real_expr_to_smtlib(redef)]])
     const next_solver_smtlib_string = next_solver_commands.map((s) => s_to_string(s, false)).join('\n')
-    console.log(next_solver_smtlib_string)
     const next_solver = new Solver()
     next_solver.fromString(next_solver_smtlib_string)
     const result = await next_solver.check()
@@ -362,13 +380,23 @@ export const pr_sat_with_truth_table = async <CtxKey extends string>(
   } else {
     return { status: result, all_constraints: translated, tt, state_values: {}, model: undefined }
   }
+
+}
+
+export const pr_sat_with_truth_table = async <CtxKey extends string>(
+  ctx: Context<CtxKey>,
+  tt: TruthTable,
+  constraints: Constraint[],
+  regular: boolean = false,
+): Promise<SolverReturn> => {
+  return await pr_sat_with_options(ctx, tt, constraints, { regular })
 }
 
 export const pr_sat = async <CtxKey extends string>(
   ctx: Context<CtxKey>,
   constraints: Constraint[],
   regular: boolean = false,
-): Promise<{ status: 'sat', all_constraints: Constraint[], tt: TruthTable, state_values: Record<number, number>, model: Record<number, ModelAssignmentOutput> } | { status: 'unsat' | 'unknown', all_constraints: Constraint[], state_values: Record<number, number>, tt: TruthTable, model: undefined }> => {
+): Promise<SolverReturn> => {
   const tt = new TruthTable(variables_in_constraints(constraints))
   return pr_sat_with_truth_table(ctx, tt, constraints, regular)
 }
