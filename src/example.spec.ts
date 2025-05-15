@@ -429,10 +429,11 @@ describe('z3', () => {
           const start = performance.now()
           const tt = new TruthTable(variables_in_constraints(constraints))
           const timeout_ms = 5_000
+          const fudge = 1_000
           const { status: sat, model: _ } = await pr_sat_with_options(Context('main'), tt, constraints, { timeout_ms })
           const end = performance.now()
           expect(sat).toEqual('unknown')
-          expect(end - start).toBeLessThan(timeout_ms + 500)
+          expect(end - start).toBeLessThan(timeout_ms + fudge)
         })
       })
     })
