@@ -955,6 +955,7 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
       }
 
     } catch (e: any) {
+      state.set({ tag: 'unknown' })
       model_container.appendChild(el('div', { style: 'color: red;' },
         el('div', {}, 'Exception!'),
         e.message))
