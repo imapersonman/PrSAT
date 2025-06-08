@@ -317,7 +317,8 @@ export const generic_input_block = <ParseOutput extends {}>(
 
   let copy_message_animation_timer: ReturnType<typeof setTimeout> | undefined = undefined
   copy_button.onclick = async () => {
-    await navigator.clipboard.writeText(batch_logic.text.get())
+    const all_text = block.get_fields().join('\n')
+    await navigator.clipboard.writeText(all_text)
     copy_message_container.classList.add('show')
     copy_button.disabled = true
     copy_message_animation_timer = setTimeout(() => {
