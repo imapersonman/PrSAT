@@ -863,7 +863,9 @@ const fancy_evaluator_result_to_display = (output: FancyEvaluatorOutput): Node =
         return letter_string(v)
       }
     }).join(', ')
-    return el('span', { class: 'error' }, `Undeclared variables: ${fv_str}`)
+    return math_el('mtext', { class: 'error' }, `Undeclared variables: ${fv_str}`)
+  } else if (output.tag === 'div0') {
+    return math_el('mtext', { class: 'error' }, 'Division by zero!')
   } else {
     return fallthrough('fancy_evaluator_result_to_display', output)
   }

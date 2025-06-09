@@ -731,7 +731,17 @@ export const sentence_to_random_string = (random: Random, s: Sentence): string =
 //   | string
 //   | S[]
 
-const div0_conditions_in_single_constraint = (c: Constraint): Constraint[] => {
+export const div0_conditions_in_constraint_or_real_expr = (c_or_re: ConstraintOrRealExpr): Constraint[] => {
+  if (c_or_re.tag === 'constraint') {
+    return div0_conditions_in_single_constraint(c_or_re.constraint)
+  } else if (c_or_re.tag === 'real_expr') {
+    return div0_conditions_in_real_expr(c_or_re.real_expr)
+  } else {
+    return fallthrough('div0_conditions_in_constraint_or_real_expr', c_or_re)
+  }
+}
+
+export const div0_conditions_in_single_constraint = (c: Constraint): Constraint[] => {
   if (c.tag === 'equal') {
     return [...div0_conditions_in_real_expr(c.left), ...div0_conditions_in_real_expr(c.right)]
   } else if (c.tag === 'not_equal') {
@@ -1678,9 +1688,50 @@ export const free_real_variables_in_real_expr = (expr: RealExpr, set: Set<string
   return set
 }
 
+const free_real_variables_in_constraint = (c: Constraint, set: Set<string>): Set<string> => {
+  const sub = (c: Constraint) => free_real_variables_in_constraint(c, set)
+  const sub_real = (re: RealExpr) => free_real_variables_in_real_expr(re, set)
+  if (c.tag === 'biconditional') {
+    sub(c.left)
+    sub(c.right)
+  } else if (c.tag === 'conditional') {
+    sub(c.left)
+    sub(c.right)
+  } else if (c.tag === 'conjunction') {
+    sub(c.left)
+    sub(c.right)
+  } else if (c.tag === 'disjunction') {
+    sub(c.left)
+    sub(c.right)
+  } else if (c.tag === 'equal') {
+    sub_real(c.left)
+    sub_real(c.right)
+  } else if (c.tag === 'greater_than') {
+    sub_real(c.left)
+    sub_real(c.right)
+  } else if (c.tag === 'greater_than_or_equal') {
+    sub_real(c.left)
+    sub_real(c.right)
+  } else if (c.tag === 'less_than') {
+    sub_real(c.left)
+    sub_real(c.right)
+  } else if (c.tag === 'less_than_or_equal') { 
+    sub_real(c.left)
+    sub_real(c.right)
+  } else if (c.tag === 'negation') {
+    sub(c.constraint)
+  } else if (c.tag === 'not_equal') {
+    sub_real(c.left)
+    sub_real(c.right)
+  } else {
+    return fallthrough('free_real_variables_in_constraint', c)
+  }
+  return set
+}
+
 export const free_real_variables_in_constraint_or_real_expr = (c_or_re: ConstraintOrRealExpr, set: Set<string>): Set<string> => {
   if (c_or_re.tag === 'constraint') {
-    return set
+    return free_real_variables_in_constraint(c_or_re.constraint, set)
   } else if (c_or_re.tag === 'real_expr') {
     return free_real_variables_in_real_expr(c_or_re.real_expr, set)
   } else {

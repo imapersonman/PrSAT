@@ -1,6 +1,6 @@
 import { Context, Expr, init, Model, Z3HighLevel, Z3LowLevel } from "z3-solver"
 import { match_s, S, spv, clause, s_to_string, default_clause } from "./s"
-import { constraints_to_smtlib_string, eliminate_state_variable_index, enrich_constraints, parse_s, real_expr_to_smtlib, translate, TruthTable, variables_in_constraints, state_index_id, constraint_to_smtlib, translate_constraint, translate_real_expr, free_variables_in_constraint_or_real_expr as free_sentence_variables_in_constraint_or_real_expr, LetterSet, free_real_variables_in_constraint_or_real_expr, VariableLists } from "./pr_sat"
+import { constraints_to_smtlib_string, eliminate_state_variable_index, enrich_constraints, parse_s, real_expr_to_smtlib, translate, TruthTable, variables_in_constraints, state_index_id, constraint_to_smtlib, translate_constraint, translate_real_expr, free_variables_in_constraint_or_real_expr as free_sentence_variables_in_constraint_or_real_expr, LetterSet, free_real_variables_in_constraint_or_real_expr, VariableLists, div0_conditions_in_constraint_or_real_expr } from "./pr_sat"
 import { ConstraintOrRealExpr, PrSat } from "./types"
 import { as_array, assert, assert_exists, assert_result, fallthrough, Res } from "./utils"
 
@@ -70,7 +70,66 @@ export const constraint_or_real_expr_to_smtlib = (tt: TruthTable, c_or_re: Const
 
 export type FancyEvaluatorOutput =
   | { tag: 'undeclared-vars', variables: VariableLists }
+  | { tag: 'div0' }
   | { tag: 'result', result: ModelAssignmentOutput }
+
+// const constraint_contains_div0 = (c: Constraint): boolean => {
+//   const sub = constraint_contains_div0
+//   const sub_real = real_expr_contains_div0
+//   if (c.tag === 'biconditional') {
+//     return sub(c.left) || sub(c.right)
+//   } else if (c.tag === 'conditional') {
+//     return sub(c.left) || sub(c.right)
+//   } else if (c.tag === 'conjunction') {
+//     return sub(c.left) || sub(c.right)
+//   } else if (c.tag === 'disjunction') {
+//     return sub(c.left) || sub(c.right)
+//   } else if (c.tag === 'equal') {
+//     return sub_real(c.left) || sub_real(c.right)
+//   } else if (c.tag === 'greater_than') {
+//     return sub_real(c.left) || sub_real(c.right)
+//   } else if (c.tag === 'greater_than_or_equal') {
+//     return sub_real(c.left) || sub_real(c.right)
+//   } else if (c.tag === 'less_than') {
+//     return sub_real(c.left) || sub_real(c.right)
+//   } else if (c.tag === 'less_than_or_equal') {
+//     return sub_real(c.left) || sub_real(c.right)
+//   } else if (c.tag === 'negation') {
+//     return sub(c.constraint)
+//   } else if (c.tag === 'not_equal') {
+//     return sub_real(c.left) || sub_real(c.right)
+//   } else {
+//     return fallthrough('constraint_contains_div0', c)
+//   }
+// }
+
+// const real_expr_contains_div0 = (e: RealExpr): boolean => {
+//   if (e.tag === 'divide') {
+//     return 
+//   } else if (e.tag === 'given_probability') {
+//   } else if (e.tag === 'literal') {
+//   } else if (e.tag === 'minus') {
+//   } else if (e.tag === 'multiply') {
+//   } else if (e.tag === 'negative') {
+//   } else if (e.tag === 'plus') {
+//   } else if (e.tag === 'power') {
+//   } else if (e.tag === 'probability') {
+//   } else if (e.tag === 'state_variable_sum') {
+//   } else if (e.tag === 'variable') {
+//   } else {
+//     return fallthrough('real_expr_contains_div0', e)
+//   }
+// }
+
+// const constraint_or_real_expr_contains_div0 = (c_or_re: ConstraintOrRealExpr): boolean => {
+//   if (c_or_re.tag === 'constraint') {
+//     return constraint_contains_div0(c_or_re.constraint)
+//   } else if (c_or_re.tag === 'real_expr') {
+//     return real_expr_contains_div0(c_or_re.real_expr)
+//   } else {
+//     return fallthrough('constraint_or_real_expr_contains_div0', c_or_re)
+//   }
+// }
 
 export const fancy_evaluate_constraint_or_real_expr = async <CtxKey extends string>(ctx: Context<CtxKey>, tt: TruthTable, model_outputs: Record<number, ModelAssignmentOutput>, c_or_re: ConstraintOrRealExpr): Promise<FancyEvaluatorOutput> => {
   const { Solver } = ctx
@@ -93,6 +152,13 @@ export const fancy_evaluate_constraint_or_real_expr = async <CtxKey extends stri
     lines.push(['assert', ['=', id, output_as_s]])
   }
 
+  const div0_constraints = div0_conditions_in_constraint_or_real_expr(c_or_re)
+  for (const c of div0_constraints) {
+    const translated = translate_constraint(tt, c)
+    const as_smtlib = constraint_to_smtlib(translated)
+    lines.push(['assert', as_smtlib])
+  }
+
   const c_or_re_as_s = constraint_or_real_expr_to_smtlib(tt, c_or_re)
   const result_index = tt.n_states() + 1
   const result_id = state_index_id(result_index)  // Here's to hoping '_' isn't used as an id haha oops.
@@ -104,13 +170,15 @@ export const fancy_evaluate_constraint_or_real_expr = async <CtxKey extends stri
   console.log(smtlib_string)
   solver.fromString(smtlib_string)
   const result = await solver.check()
-  assert(result === 'sat', 'Evaluation solver not sat but it should be!')
 
-  const z3_model = solver.model()
-  const full_model = await model_to_assignments(ctx, z3_model)
-  const final_result = assert_exists(full_model[result_index], 'Missing result index!')
-
-  return { tag: 'result', result: final_result }
+  if (result === 'sat') {
+    const z3_model = solver.model()
+    const full_model = await model_to_assignments(ctx, z3_model)
+    const final_result = assert_exists(full_model[result_index], 'Missing result index!')
+    return { tag: 'result', result: final_result }
+  } else {
+    return { tag: 'div0' }
+  }
 }
 
 const int_to_s = (i: number): S => {

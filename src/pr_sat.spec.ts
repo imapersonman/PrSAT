@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest"
 
 import { Random } from "./random"
 import { assert, assert_exists } from "./utils"
-import { evaluate_constraint_2, a2eid, combine_inverse, constraint_builder, eliminate_state_variable_index_in_svs, evaluate_real_expr, evaluate_real_expr_2, evaluate_sentence, parse_s, random_letters_and_assignments, real_expr_to_smtlib, real_expr_to_string, RealExprFuzzer, recursively_evaluate_sentence, SentenceFuzzer, state_from_index, translate_constraint, translate_real_expr, TruthTable, constraint_to_string, evaluate_constraint, ConstraintFuzzer } from "./pr_sat"
+import { evaluate_constraint_2, a2eid, combine_inverse, constraint_builder, eliminate_state_variable_index_in_svs, evaluate_real_expr, evaluate_real_expr_2, evaluate_sentence, parse_s, random_letters_and_assignments, real_expr_to_smtlib, real_expr_to_string, RealExprFuzzer, recursively_evaluate_sentence, SentenceFuzzer, state_from_index, translate_constraint, translate_real_expr, TruthTable, constraint_to_string, evaluate_constraint, ConstraintFuzzer, free_real_variables_in_constraint_or_real_expr } from "./pr_sat"
 import { PrSat, PrSatFuncs as PrSatUtils, SentenceMap } from "./types"
 
 type Sentence = PrSat['Sentence']
@@ -554,6 +554,15 @@ describe('evaluate with state_values', () => {
         const example = constraint_fuzzer.generate(letters, depth)
         test_constraint_eval(tt, state_values, example)
       }
+    })
+  })
+})
+
+describe('free_variables', () => {
+  describe('ConstraintOrRealExpr', () => {
+    test('a = 0 (bug fix)', () => {
+      const fvs = free_real_variables_in_constraint_or_real_expr({ tag: 'constraint', constraint: eq(vbl({ id: 'a' }), lit({ value: 1 })) }, new Set())
+      expect(fvs.has('a')).toBeTruthy()
     })
   })
 })
