@@ -51,4 +51,5 @@ ${CONSTRAINT_INPUT_INSTRUCTIONS}
 
 export const SAT = 'Constraints are SATisfiable!'
 export const UNSAT = 'Constraints are UNSATisfiable!'
+export const UNKNOWN = 'Unable to determine if constraints are satisfiable'
 

@@ -85,3 +85,40 @@ test('multiple constraints', async ({ page }) => {
   await expect(page.getByTestId(TestId.model_table)).toBeVisible({ timeout: DEFAULT_TIMEOUT })
   await expect(page.getByText(Constants.SAT)).toBeVisible()
 })
+
+test('weird model', async ({ page }) => {
+  await to_load(page)
+  const single_inputs: Locator[] = []
+
+  page.getByTestId(TestId.regular_toggle).check()
+
+  single_inputs.push(page.getByTestId(TestId.single_input.constraint.get(0)))
+  await expect(single_inputs[0]).toBeVisible()
+  await single_inputs[0].getByTestId(TestId.single_input.input).fill('Pr(A & B & C) > Pr(A & B) * Pr(C)')
+  await single_inputs[0].getByTestId(TestId.single_input.newline).click()
+
+  single_inputs.push(page.getByTestId(TestId.single_input.constraint.get(1)))
+  await expect(single_inputs[1]).toBeVisible()
+  await single_inputs[1].getByTestId(TestId.single_input.input).fill('Pr(A & B) = Pr(A) * Pr(B)')
+  await single_inputs[1].getByTestId(TestId.single_input.newline).click()
+
+  single_inputs.push(page.getByTestId(TestId.single_input.constraint.get(2)))
+  await expect(single_inputs[2]).toBeVisible()
+  await single_inputs[2].getByTestId(TestId.single_input.input).fill('Pr(A & C) = Pr(A) * Pr(C)')
+  await single_inputs[2].getByTestId(TestId.single_input.newline).click()
+
+  single_inputs.push(page.getByTestId(TestId.single_input.constraint.get(3)))
+  await expect(single_inputs[3]).toBeVisible()
+  await single_inputs[3].getByTestId(TestId.single_input.input).fill('Pr(B & C) = Pr(B) * Pr(C)')
+  await single_inputs[3].getByTestId(TestId.single_input.newline).click()
+
+  single_inputs.push(page.getByTestId(TestId.single_input.constraint.get(4)))
+  await expect(single_inputs[4]).toBeVisible()
+  await single_inputs[4].getByTestId(TestId.single_input.input).fill('Pr(A & B) = Pr(C)')
+
+  await page.waitForTimeout(Constants.DEFAULT_DEBOUNCE_MS)  // Wait for all the inputs to update correctly.
+
+  await page.getByTestId(TestId.find_model).click()
+  await expect(page.getByText(Constants.SAT)).toBeVisible({ timeout: DEFAULT_TIMEOUT })  // Done searching for the model.
+  await expect(page.getByTestId(TestId.exception_id)).not.toBeVisible()
+})

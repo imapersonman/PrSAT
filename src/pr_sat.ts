@@ -5,6 +5,9 @@ type Sentence = PrSat['Sentence']
 type RealExpr = PrSat['RealExpr']
 type Constraint = PrSat['Constraint']
 
+export const letter_string = (l: SentenceMap['letter']): string =>
+  `${l.id}${l.index > 0 ? l.index : ''}`
+
 export const sentence_builder = {
   val: (v: boolean): Sentence => ({ tag: 'value', value: v }),
   letter: (id: string, index?: number): SentenceMap['letter'] => ({ tag: 'letter', id, index: index ?? 0 }),
@@ -63,7 +66,7 @@ const comp_letters = (a: SentenceMap['letter'], b: SentenceMap['letter']): numbe
   }
 }
 
-class LetterSet {
+export class LetterSet {
   private readonly underlying_map = new Map<string, Set<number>>()
   private readonly all_letters: SentenceMap['letter'][] = []
 
@@ -989,7 +992,7 @@ const translate_constraints_to_smtlib = (tt: TruthTable, constraints: Constraint
 // }
 
 import P from 'parsimmon'
-import { PrSat, RealExprMap, SentenceMap } from "./types"
+import { ConstraintOrRealExpr, PrSat, RealExprMap, SentenceMap } from "./types"
 import { Equiv } from "./tag_map"
 import { S, s_to_string } from "./s"
 
@@ -1162,7 +1165,7 @@ const flatten_constraint_children = (tag: 'conjunction' | 'disjunction' | 'condi
   }
 }
 
-const constraint_to_smtlib = (constraint: Constraint): S => {
+export const constraint_to_smtlib = (constraint: Constraint): S => {
   // :funs ( (true Bool)  (false Bool)  (not Bool Bool)
   // (=> Bool Bool Bool :right-assoc)  (and Bool Bool Bool :left-assoc)
   // (or Bool Bool Bool :left-assoc)  (xor Bool Bool Bool :left-assoc)
@@ -1210,7 +1213,7 @@ const constraint_to_smtlib = (constraint: Constraint): S => {
   }
 }
 
-const state_index_id = (state_index: number): string => {
+export const state_index_id = (state_index: number): string => {
   return `s_${state_index}`
 }
 
@@ -1638,7 +1641,64 @@ const map_eval_result = <T>(r: Res<T, EvaluationError>, f: (t: T) => Res<T, Eval
   }
 }
 
-const free_sentence_variables = (s: Sentence, set: LetterSet): LetterSet => {
+export const free_real_variables_in_real_expr = (expr: RealExpr, set: Set<string>): Set<string> => {
+  const sub = (expr: RealExpr) => free_real_variables_in_real_expr(expr, set)
+
+  if (expr.tag === 'divide') {
+    sub(expr.numerator)
+    sub(expr.denominator)
+  } else if (expr.tag === 'given_probability') {
+    // nothing!
+  } else if (expr.tag === 'literal') {
+    // nothing!
+  } else if (expr.tag === 'minus') {
+    sub(expr.left)
+    sub(expr.right)
+  } else if (expr.tag === 'multiply') {
+    sub(expr.left)
+    sub(expr.right)
+  } else if (expr.tag === 'negative') {
+    sub(expr.expr)
+  } else if (expr.tag === 'plus') {
+    sub(expr.left)
+    sub(expr.right)
+  } else if (expr.tag === 'power') {
+    sub(expr.base)
+    sub(expr.exponent)
+  } else if (expr.tag === 'probability') {
+    // nothing!
+  } else if (expr.tag === 'state_variable_sum') {
+    // nothing!
+  } else if (expr.tag === 'variable') {
+    set.add(expr.id)
+  } else {
+    return fallthrough('free_real_variables_in_real_expr', expr)
+  }
+
+  return set
+}
+
+export const free_real_variables_in_constraint_or_real_expr = (c_or_re: ConstraintOrRealExpr, set: Set<string>): Set<string> => {
+  if (c_or_re.tag === 'constraint') {
+    return set
+  } else if (c_or_re.tag === 'real_expr') {
+    return free_real_variables_in_real_expr(c_or_re.real_expr, set)
+  } else {
+    return fallthrough('free_variables_in_constraint_or_real_expr', c_or_re)
+  }
+}
+
+export const free_variables_in_constraint_or_real_expr = (c_or_re: ConstraintOrRealExpr, set: LetterSet, declared: LetterSet): LetterSet => {
+  if (c_or_re.tag === 'constraint') {
+    return free_sentence_variables_in_constraint(c_or_re.constraint, set, declared)
+  } else if (c_or_re.tag === 'real_expr') {
+    return free_sentence_variables_in_real_expr(c_or_re.real_expr, set, declared)
+  } else {
+    return fallthrough('free_variables_in_constraint_or_real_expr', c_or_re)
+  }
+}
+
+export const free_sentence_variables = (s: Sentence, set: LetterSet, declared: LetterSet): LetterSet => {
   const sub = (s: Sentence): void => {
     if (s.tag === 'biconditional') {
       sub(s.left)
@@ -1653,7 +1713,9 @@ const free_sentence_variables = (s: Sentence, set: LetterSet): LetterSet => {
       sub(s.left)
       sub(s.right)
     } else if (s.tag === 'letter') {
-      set.add(s)
+      if (!declared.has(s)) {
+        set.add(s)
+      }
     } else if (s.tag === 'negation') {
       sub(s.sentence)
     } else if (s.tag === 'value') {
@@ -1667,14 +1729,14 @@ const free_sentence_variables = (s: Sentence, set: LetterSet): LetterSet => {
   return set
 }
 
-const free_sentence_variables_in_real_expr = (expr: RealExpr, set: LetterSet): LetterSet => {
+export const free_sentence_variables_in_real_expr = (expr: RealExpr, set: LetterSet, declared: LetterSet): LetterSet => {
   const sub = (expr: RealExpr): void => {
     if (expr.tag === 'divide') {
       sub(expr.numerator)
       sub(expr.denominator)
     } else if (expr.tag === 'given_probability') {
-      free_sentence_variables(expr.arg, set)
-      free_sentence_variables(expr.given, set)
+      free_sentence_variables(expr.arg, set, declared)
+      free_sentence_variables(expr.given, set, declared)
     } else if (expr.tag === 'literal') {
       // nothing!
     } else if (expr.tag === 'minus') {
@@ -1692,7 +1754,7 @@ const free_sentence_variables_in_real_expr = (expr: RealExpr, set: LetterSet): L
       sub(expr.base)
       sub(expr.exponent)
     } else if (expr.tag === 'probability') {
-      free_sentence_variables(expr.arg, set)
+      free_sentence_variables(expr.arg, set, declared)
     } else if (expr.tag === 'state_variable_sum') {
       // nothing!
     } else if (expr.tag === 'variable') {
@@ -1706,7 +1768,7 @@ const free_sentence_variables_in_real_expr = (expr: RealExpr, set: LetterSet): L
   return set
 }
 
-export const free_sentence_variables_in_constraint = (c: Constraint, set: LetterSet): LetterSet => {
+export const free_sentence_variables_in_constraint = (c: Constraint, set: LetterSet, declared: LetterSet): LetterSet => {
   const sub = (c: Constraint): void => {
     if (c.tag === 'biconditional') {
       sub(c.left)
@@ -1721,25 +1783,25 @@ export const free_sentence_variables_in_constraint = (c: Constraint, set: Letter
       sub(c.left)
       sub(c.right)
     } else if (c.tag === 'equal') {
-      free_sentence_variables_in_real_expr(c.left, set)
-      free_sentence_variables_in_real_expr(c.right, set)
+      free_sentence_variables_in_real_expr(c.left, set, declared)
+      free_sentence_variables_in_real_expr(c.right, set, declared)
     } else if (c.tag === 'greater_than') {
-      free_sentence_variables_in_real_expr(c.left, set)
-      free_sentence_variables_in_real_expr(c.right, set)
+      free_sentence_variables_in_real_expr(c.left, set, declared)
+      free_sentence_variables_in_real_expr(c.right, set, declared)
     } else if (c.tag === 'greater_than_or_equal') {
-      free_sentence_variables_in_real_expr(c.left, set)
-      free_sentence_variables_in_real_expr(c.right, set)
+      free_sentence_variables_in_real_expr(c.left, set, declared)
+      free_sentence_variables_in_real_expr(c.right, set, declared)
     } else if (c.tag === 'less_than') {
-      free_sentence_variables_in_real_expr(c.left, set)
-      free_sentence_variables_in_real_expr(c.right, set)
+      free_sentence_variables_in_real_expr(c.left, set, declared)
+      free_sentence_variables_in_real_expr(c.right, set, declared)
     } else if (c.tag === 'less_than_or_equal') {
-      free_sentence_variables_in_real_expr(c.left, set)
-      free_sentence_variables_in_real_expr(c.right, set)
+      free_sentence_variables_in_real_expr(c.left, set, declared)
+      free_sentence_variables_in_real_expr(c.right, set, declared)
     } else if (c.tag === 'negation') {
       sub(c.constraint)
     } else if (c.tag === 'not_equal') {
-      free_sentence_variables_in_real_expr(c.left, set)
-      free_sentence_variables_in_real_expr(c.right, set)
+      free_sentence_variables_in_real_expr(c.left, set, declared)
+      free_sentence_variables_in_real_expr(c.right, set, declared)
     } else {
       return fallthrough('free_sentence_variables_in_constraint', c)
     }
@@ -1813,8 +1875,7 @@ export const evaluate_real_expr_2 = (tt: TruthTable, state_values: Record<number
     }
   }
 
-  const vars = free_sentence_variables_in_real_expr(expr, new LetterSet([]))
-  const fvs = vars.diff(new LetterSet([...tt.letters()]))
+  const fvs = free_sentence_variables_in_real_expr(expr, new LetterSet([]), new LetterSet([...tt.letters()]))
   const result = sub(expr)
   const [status, value] = result
   if (status) {

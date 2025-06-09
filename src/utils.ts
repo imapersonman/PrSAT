@@ -188,3 +188,10 @@ export const fallthrough = <R>(fname: string, _t: never): R => {
     throw new Error(`${fname} fallthrough`)
 }
 
+export const as_array = <T, O>(t: T[] | O, message: string = 'Expected array!'): T[] => {
+    if (Array.isArray(t)) {
+        return t
+    } else {
+        throw new Error(message)
+    }
+}

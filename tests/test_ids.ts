@@ -35,21 +35,6 @@ export const state_row = readonly({
   value: (index: number) => `state-value-${index}`,
 })
 
-// export const constraint_multi_view = readonly({
-//   id: 'constraint-group-input-Multi',
-// })
-// export const constraint_batch_view = readonly({
-//   id: 'constraint-group-input-Batch',
-//   textbox: 'group-input-Batch-textbox',
-// })
-// export const eval_multi_view = readonly({
-//   id: 'eval-group-input-Multi',
-// })
-// export const eval_batch_view = readonly({
-//   id: 'eval-group-input-Batch',
-//   textbox: 'eval-group-input-Batch-textbox',
-// })
-
 export type GenericMultiInputTestIds = {
   id: string
   multi: Readonly<{
@@ -75,3 +60,6 @@ export const generic_multi_input = (prefix: 'constraints' | 'eval'): GenericMult
     }),
   }
 }
+
+export const exception_id = 'exception'
+export const state_display_id = 'state-display'

@@ -1,15 +1,15 @@
 import { Context } from "z3-solver";
 import { Editable, rEditable } from './editable';
 import { el, math_el, tel } from "./el";
-import { assert, assert_exists, fallthrough, Res } from "./utils";
+import { assert, assert_exists, fallthrough } from "./utils";
 import { parse_constraint, parse_constraint_or_real_expr } from "./parser";
-import { constraint_to_string, evaluate_constraint_2, evaluate_real_expr_2, EvaluationError, sentence_to_string, TruthTable, VariableLists, variables_in_constraints } from "./pr_sat";
-import { init_z3, ModelAssignmentOutput, pr_sat_with_truth_table } from "./z3_integration";
+import { constraint_to_string, letter_string, TruthTable, variables_in_constraints } from "./pr_sat";
+import { fancy_evaluate_constraint_or_real_expr, FancyEvaluatorOutput, init_z3, ModelAssignmentOutput, pr_sat_with_truth_table } from "./z3_integration";
 import { s_to_string } from "./s";
 import { ConstraintOrRealExpr, PrSat } from "./types";
 import { Equiv } from "./tag_map";
 import { InputBlockLogic } from "./display_logic";
-import { constraint_to_html, letter_string, real_expr_to_html, state_id } from "./prsat_to_html";
+import { constraint_to_html, real_expr_to_html, state_id } from "./prsat_to_html";
 import { generic_input_block, split_input, SplitInput } from "./block_playground";
 
 import * as TestId from '../tests/test_ids'
@@ -571,6 +571,63 @@ const hasMathMLSupport = () => {
 //   return { element, all_constraints, get_fields, set_fields, refresh }
 // }
 
+const display_polynomial_coefficient = (c: number): Node => {
+  if (c < 0) {
+    return math_el('mrow', {}, math_el('mo', {}, '-'), math_el('mi', {}, (-c).toString()))
+  } else {
+    return math_el('mi', {}, c.toString())
+  }
+}
+
+const display_polynomial_term = (c: number, degree: number): Node => {
+  assert(c !== 0, 'coefficient === zero so it shouldn\'t be displayed!')
+  const dc = display_polynomial_coefficient
+  if (degree === 0) {
+    return dc(c)
+  } else if (degree === 1) {
+    const x = math_el('mi', {}, 'x')
+    if (c === 1) {
+      return x
+    } else if (c === -1) {
+      return math_el('mrow', {}, math_el('mo', {}, '-'), x)
+    } else {
+      const m = math_el('mo', {}, '*')
+      return math_el('mrow', {}, dc(c), m, x)
+    }
+  } else {
+    // degree ≥ 2.
+    const x = math_el('msup', {}, math_el('mi', {}, 'x'), dc(degree))
+    if (c === 1) {
+      return x
+    } else if (c === -1) {
+      return math_el('mrow', {}, math_el('mo', {}, '-'), x)
+    } else {
+      const m = math_el('mo', {}, '*')
+      return math_el('mrow', {}, dc(c), m, x)
+    }
+  }
+}
+
+const display_polynomial = (coefficients: number[]): Node => {
+  const cs = coefficients
+  const final_node = math_el('mrow', {})
+  for (const [index, c] of cs.entries()) {
+    const degree = cs.length - index - 1
+    if (c === 0) {
+      continue
+    }
+
+    const term = display_polynomial_term(c, degree)
+    final_node.appendChild(term)
+
+    if (index !== cs.length - 1) {
+      const p = math_el('mo', {}, '+')
+      final_node.appendChild(p)
+    }
+  }
+  return final_node
+}
+
 const model_assignment_display = (ma: ModelAssignmentOutput): Node => {
   const wrap = (ma: ModelAssignmentOutput): Node => {
     if (ma.tag === 'negative') {
@@ -596,15 +653,20 @@ const model_assignment_display = (ma: ModelAssignmentOutput): Node => {
         math_el('mo', {}, '*'), wrap(ma.c))
       const det = math_el('mrow', {}, b_2, math_el('mo', {}, '-'), _4ac)
       const sqrt_det = math_el('msqrt', {}, det)
-      assert(ma.index === 1 || ma.index === 2)
+      assert(ma.index === 1 || ma.index === 2, `Expected root-obj index to equal 1 or 2!\nactual: ${ma.index}`)
       const pm = math_el('mo', {}, ma.index === 1 ? '-' : '+')
       const num = math_el('mrow', {}, math_el('mrow', {}, math_el('mo', {}, '-'), wrap(ma.b)), pm, sqrt_det)
       const den = math_el('mrow', {}, math_el('mi', {}, '2'), math_el('mo', {}, '*'), wrap(ma.a))
       return math_el('mfrac', {}, num, den)
     } else if (ma.tag === 'unknown') {
-      return el('span', {}, s_to_string(ma.s))
+      return math_el('mtext', {}, s_to_string(ma.s))
+      // return math_el('mtext', {}, 'something!')
+    } else if (ma.tag === 'generic-root-obj') {
+      // return sub({ tag: 'unknown', s: ['root-obj', poly_s(ma.coefficients), ma.index.toString()] })
+      // return math_el('mtext', {}, model_assignment_output_to_string(ma))
+      return math_el('mrow', {}, math_el('mtext', {}, `Root #${ma.index} of `), math_el('mpadded', { lspace: '0.2em' }, display_polynomial(ma.coefficients)))
     } else {
-      throw new Error('model_assignment_to_display fallthrough')
+      return fallthrough('model_assignment_to_display', ma)
     }
   }
 
@@ -728,61 +790,61 @@ const display_constraint_or_real_expr = (e: ConstraintOrRealExpr, wrap_in_math_e
   }
 }
 
-const evaluate_constraint_or_real_expr = (tt: TruthTable, state_values: Record<number, number>, e: ConstraintOrRealExpr): Res<boolean | number, EvaluationError> => {
-  if (e.tag === 'constraint') {
-    return evaluate_constraint_2(tt, state_values, e.constraint)
-  } else if (e.tag === 'real_expr') {
-    return evaluate_real_expr_2(tt, state_values, e.real_expr)
-  } else {
-    const check: Equiv<typeof e, never> = true
-    void check
-    throw new Error('evaluate_constraint_or_real_expr fallthrough')
-  }
-}
+// const evaluate_constraint_or_real_expr = (tt: TruthTable, state_values: Record<number, number>, e: ConstraintOrRealExpr): Res<boolean | number, EvaluationError> => {
+//   if (e.tag === 'constraint') {
+//     return evaluate_constraint_2(tt, state_values, e.constraint)
+//   } else if (e.tag === 'real_expr') {
+//     return evaluate_real_expr_2(tt, state_values, e.real_expr)
+//   } else {
+//     const check: Equiv<typeof e, never> = true
+//     void check
+//     throw new Error('evaluate_constraint_or_real_expr fallthrough')
+//   }
+// }
 
-const value_to_string = (value: boolean | number): string => {
-  if (typeof value === 'boolean') {
-    return value ? '⊤' : '⊥'
-  } else if (typeof value === 'number') {
-    return value.toString()
-  } else {
-    const check: Equiv<typeof value, never> = true
-    void check
-    throw new Error('value_to_string fallthrough')
-  }
-}
+// const value_to_string = (value: boolean | number): string => {
+//   if (typeof value === 'boolean') {
+//     return value ? '⊤' : '⊥'
+//   } else if (typeof value === 'number') {
+//     return value.toString()
+//   } else {
+//     const check: Equiv<typeof value, never> = true
+//     void check
+//     throw new Error('value_to_string fallthrough')
+//   }
+// }
 
-const undeclared_variables_string = (vlists: VariableLists): string => {
-  let result = 'Undeclared variables: '
-  if (vlists.real.length === 0 && vlists.sentence.length === 0) {
-    return 'Undeclared variables!'
-  }
+// const undeclared_variables_string = (vlists: VariableLists): string => {
+//   let result = 'Undeclared variables: '
+//   if (vlists.real.length === 0 && vlists.sentence.length === 0) {
+//     return 'Undeclared variables!'
+//   }
 
-  if (vlists.real.length > 0) {
-    result += vlists.real.join(', ')
-    if (vlists.sentence.length > 0) {
-      result += ', '
-    }
-  }
-  if (vlists.sentence.length > 0) {
-    result += vlists.sentence.map(sentence_to_string).join(', ')
-  }
+//   if (vlists.real.length > 0) {
+//     result += vlists.real.join(', ')
+//     if (vlists.sentence.length > 0) {
+//       result += ', '
+//     }
+//   }
+//   if (vlists.sentence.length > 0) {
+//     result += vlists.sentence.map(sentence_to_string).join(', ')
+//   }
 
-  return result
-}
+//   return result
+// }
 
-const constraint_to_real_expr_result_to_html = (e: Res<boolean | number, EvaluationError>): Element => {
-  const [status, value] = e
-  if (status) {
-    return math_el('mtext', {}, value_to_string(value))
-  } else if (value.tag === 'div0') {
-    return math_el('mtext', { class: 'error' }, 'Division by 0!')
-  } else if (value.tag === 'undeclared-vars') {
-    return math_el('mtext', { class: 'error' }, undeclared_variables_string(value.vars))
-  } else {
-    return fallthrough('constraint_to_real_expr_result_to_html', value)
-  }
-}
+// const constraint_to_real_expr_result_to_html = (e: Res<boolean | number, EvaluationError>): Element => {
+//   const [status, value] = e
+//   if (status) {
+//     return math_el('mtext', {}, value_to_string(value))
+//   } else if (value.tag === 'div0') {
+//     return math_el('mtext', { class: 'error' }, 'Division by 0!')
+//   } else if (value.tag === 'undeclared-vars') {
+//     return math_el('mtext', { class: 'error' }, undeclared_variables_string(value.vars))
+//   } else {
+//     return fallthrough('constraint_to_real_expr_result_to_html', value)
+//   }
+// }
 
 type ModelEvaluator = {
   element: HTMLElement
@@ -790,16 +852,39 @@ type ModelEvaluator = {
   refresh: () => void
 }
 
-const model_evaluators = (model_assignments: rEditable<{ truth_table: TruthTable, values: Record<number, number> } | undefined>): ModelEvaluator => {
-  const display_constraint_or_real_expr_with_evaluation = (e: ConstraintOrRealExpr): Element => {
+const fancy_evaluator_result_to_display = (output: FancyEvaluatorOutput): Node => {
+  if (output.tag === 'result') {
+    return model_assignment_display(output.result)
+  } else if (output.tag === 'undeclared-vars') {
+    const fv_str = [...output.variables.real, ...output.variables.sentence].map((v) => {
+      if (typeof v === 'string') {
+        return v
+      } else {
+        return letter_string(v)
+      }
+    }).join(', ')
+    return el('span', { class: 'error' }, `Undeclared variables: ${fv_str}`)
+  } else {
+    return fallthrough('fancy_evaluator_result_to_display', output)
+  }
+}
+
+const model_evaluators = (z3_state_box: Editable<Z3ContextState>, model_assignments: rEditable<{ truth_table: TruthTable, values: Record<number, ModelAssignmentOutput> } | undefined>): ModelEvaluator => {
+  const display_constraint_or_real_expr_with_evaluation = async (e: ConstraintOrRealExpr): Promise<Element> => {
     const d = display_constraint_or_real_expr(e, false)
     const assignments = model_assignments.get()
     if (assignments === undefined) {
       return d
     } else {
       // Weird that we're evaluating in a display function but I don't care.
-      const result = evaluate_constraint_or_real_expr(assignments.truth_table, assignments.values, e)
-      const result_html = constraint_to_real_expr_result_to_html(result)
+      // const result = evaluate_constraint_or_real_expr(assignments.truth_table, assignments.values, e)
+      const z3_state = z3_state_box.get()
+      if (z3_state.tag !== 'ready') {
+        throw new Error('Trying to evaluate model that isn\'t ready!')
+      }
+      const result = await fancy_evaluate_constraint_or_real_expr(z3_state.ctx, assignments.truth_table, assignments.values, e)  // Could throw!
+      // const result_html = constraint_to_real_expr_result_to_html(result)
+      const result_html = fancy_evaluator_result_to_display(result)
       return math_el('math', {},
         d,
         math_el('mo', { class: 'yields' }, '⟾'),
@@ -835,14 +920,16 @@ const model_evaluators = (model_assignments: rEditable<{ truth_table: TruthTable
 
 const model_finder_display = (constraint_block: InputBlockLogic<Constraint, SplitInput>): ModelFinderDisplay => {
   const state = new Editable<ModelFinderState>({ tag: 'waiting' })
-  const model_assignments = new Editable<{ truth_table: TruthTable, values: Record<number, number> } | undefined>(undefined)
   const model_container = el('div', { class: 'model-container' })
-  const state_display = el('div', {})
-  const left_side = el('div', {},
-    state_display,
+  const state_display = tel(TestId.state_display_id, 'div', {})
+  const status_container = el('div', {}, state_display)
+  const left_side = el('div', { style: 'border-right: solid gainsboro; padding-right: 1em;' },
+    status_container,
     model_container,
   )
-  const evaluators = model_evaluators(model_assignments)
+  const z3_state = new Editable<Z3ContextState>({ tag: 'loading' })
+  const model_assignments = new Editable<{ truth_table: TruthTable, values: Record<number, ModelAssignmentOutput> } | undefined>(undefined)
+  const evaluators = model_evaluators(z3_state, model_assignments)
   const right_side = el('div', {},
     // evaluators.element,  // Will be added in the state watcher.
   )
@@ -853,11 +940,9 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
   const constraints_view = el('div', {})
 
   const generate_button = tel(TestId.find_model, 'input', { type: 'button', value: Constants.FIND_MODEL_BUTTON_LABEL, class: 'generate' }) as HTMLButtonElement
-  // const options_button = el('input', { type: 'button', value: '⚙', class: 'options' }) as HTMLButtonElement
   const z3_status_container = tel(TestId.z3_status, 'div', { style: 'margin-left: 0.4em;' })
   const is_regular = new Editable(false)
   const regular_toggle = tel(TestId.regular_toggle, 'input', { type: 'checkbox', style: 'margin-left: 0.4em;' }, 'Regular') as HTMLInputElement
-  const z3_state = new Editable<Z3ContextState>({ tag: 'loading' })
   const generate_line = el('div', { style: 'display: flex;' },
     generate_button,
     // el('input', { type: 'button', value: Constants.FIND_MODEL_BUTTON_LABEL, class: 'generate' }) as HTMLButtonElement,
@@ -953,12 +1038,13 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
         const e = constraint_to_html(constraint, true)
         constraints_view.appendChild(el('div', { style: 'margin-top: 0.4em;' }, e))
       }
-
-    } catch (e: any) {
+    }
+    catch (e: any) {
       state.set({ tag: 'unknown' })
-      model_container.appendChild(el('div', { style: 'color: red;' },
-        el('div', {}, 'Exception!'),
+      status_container.appendChild(el('div', { style: 'color: red;' },
+        tel(TestId.exception_id, 'div', {}, 'Exception!'),
         e.message))
+      console.error(e.stack)
     }
   }
 
@@ -986,7 +1072,7 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
   state.watch((state) => {
     // Logic
     if (state.tag === 'sat') {
-      model_assignments.set({ truth_table: state.truth_table, values: state.state_values })
+      model_assignments.set({ truth_table: state.truth_table, values: state.assignments })
       // evaluators.multi_input.refresh()
       evaluators.refresh()
     } else if (state.tag === 'invalidated') {
@@ -1017,7 +1103,7 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
       right_side.appendChild(evaluators.element)
     } else if (state.tag === 'unknown') {
       state_display.innerHTML = ''
-      state_display.append('Unable to determine if constraints are satisfiable')
+      state_display.append(Constants.UNKNOWN)
     } else if (state.tag === 'unsat') {
       state_display.innerHTML = ''
       state_display.append(Constants.UNSAT)
@@ -1112,7 +1198,7 @@ const main = (): HTMLElement => {
   // const mi = generic_multi_input(TestId.generic_multi_input('constraints'), TestId.single_input.constraint, Constants.CONSTRAINT_INPUT_PLACEHOLDER, Constants.BATCH_CONSTRAINT_INPUT_PLACEHOLDER, Constants.CONSTRAINT_INPUT_INSTRUCTIONS, parse_constraint, constraint_to_html)
   const constraint_block = new InputBlockLogic<Constraint, SplitInput>(
     parse_constraint,
-    (logic) => split_input(logic, (c) => constraint_to_html(c, true), Constants.CONSTRAINT_INPUT_PLACEHOLDER, TestId.single_input.constraint))
+    (logic) => split_input(logic, async (c) => constraint_to_html(c, true), Constants.CONSTRAINT_INPUT_PLACEHOLDER, TestId.single_input.constraint))
   const mi = generic_input_block(constraint_block, Constants.BATCH_CONSTRAINT_INPUT_PLACEHOLDER)
 
   const model_finder = model_finder_display(constraint_block)

@@ -1,6 +1,6 @@
 import { math_el } from "./el"
-import { possible_constraint_connectives, possible_sentence_connectives } from "./pr_sat"
-import { PrSat, SentenceMap } from "./types"
+import { letter_string, possible_constraint_connectives, possible_sentence_connectives } from "./pr_sat"
+import { PrSat } from "./types"
 import { assert_exists } from "./utils"
 
 type Sentence = PrSat['Sentence']
@@ -11,9 +11,6 @@ export const state_id = (index: number | string): MathMLElement => {
   const i = typeof index === 'number' ? index + 1 : index
   return math_el('msub', {}, math_el('mi', {}, 'a'), math_el('mi', {}, i.toString()))
 }
-
-export const letter_string = (l: SentenceMap['letter']): string =>
-  `${l.id}${l.index > 0 ? l.index : ''}`
 
 export const constraint_to_html = (constraint: Constraint, wrap_in_math_element: boolean): MathMLElement => {
   const re2h = (expr: RealExpr): MathMLElement => real_expr_to_html(expr, false)

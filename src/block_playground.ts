@@ -35,7 +35,7 @@ const make_hideable = (view: HTMLElement, hidden: Editable<boolean>): void => {
 
 export const split_input = <ParseOutput extends {}>(
   logic: SingleInputLogic<ParseOutput, SplitInput>,
-  display: (output: ParseOutput) => Element,
+  display: (output: ParseOutput) => Promise<Element>,
   placeholder_text: string,
   test_id_gen: TestIdGenerator,
 ): SplitInput => {
@@ -127,13 +127,13 @@ export const split_input = <ParseOutput extends {}>(
     delete_button.disabled = !has_siblings
   })
 
-  logic.on_state_change((state) => {
+  logic.on_state_change(async (state) => {
     output_container.innerHTML = ''
     output_container.style.display = 'none'
     error_info_container.innerHTML = ''
 
     if (state.tag === 'parsed') {
-      const output_element = display(state.output)
+      const output_element = await display(state.output)
       output_container.appendChild(output_element)
       output_container.style.display = 'inline'
       info_button.value = INFO_MESSAGE_OKAY

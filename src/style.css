@@ -124,7 +124,7 @@ input[type=button].options {
   border-radius: 0.4em;
   margin-top: 0.4em;
   background-color: rgb(240, 240, 240);
-  width: fit-content;
+  /* width: fit-content; */
   padding: 0.4em;
 }
 
