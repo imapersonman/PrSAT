@@ -769,6 +769,7 @@ export const div0_conditions_in_single_constraint = (c: Constraint): Constraint[
   }
 }
 
+// TODO: Write function that just pulls out denominators, then change this family of functions so it just returns the negation of equality to zero or whatever.
 export const div0_conditions_in_real_expr = (expr: RealExpr): Constraint[] => {
   if (expr.tag === 'literal') {
     return []

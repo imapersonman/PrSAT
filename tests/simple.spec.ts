@@ -218,3 +218,15 @@ test('setting multiple evals at once', async ({ page }) => {
   await set_block_input(page, eval_test_ids, ['Pr(A)', 'Pr(B)'])
   await expect(page.getByText('Exception')).not.toBeVisible()
 })
+
+test('detect division by zero', async ({ page }) => {
+  await to_load(page)
+
+  const constraint_test_ids = TestId.generic_multi_input('constraints')
+  await set_block_input(page, constraint_test_ids, ['Pr(A & B) = Pr(A) * Pr(B)'])
+  await find_model(page, 'sat')
+
+  const eval_test_ids = TestId.generic_multi_input('eval')
+  await set_block_input(page, eval_test_ids, ['Pr(A) / 0'])
+  await expect(page.getByTestId(eval_test_ids.split.single.get(0))).toContainText(Constants.DIV0)
+})

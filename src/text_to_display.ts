@@ -868,7 +868,7 @@ const fancy_evaluator_result_to_display = (output: FancyEvaluatorOutput): Node =
     }).join(', ')
     return math_el('mtext', { class: 'error' }, `Undeclared variables: ${fv_str}`)
   } else if (output.tag === 'div0') {
-    return math_el('mtext', { class: 'error' }, 'Division by zero!')
+    return math_el('mtext', { class: 'error' }, Constants.DIV0)
   } else {
     return fallthrough('fancy_evaluator_result_to_display', output)
   }
@@ -901,18 +901,6 @@ const model_evaluators = (
     }
   }
 
-  // Error: you can't execute multiple async functions at the same time; let the previous one finish first
-  //   at Module.async_call (z3-built.js:115:11)
-  //   at Object.simplify (z3-solver.js?v=6ce20369:2322:24)
-  //   at Object.simplify (z3-solver.js?v=6ce20369:3820:35)
-  //   at expr_to_assignment (z3_integration.ts:474:32)
-  //   at fancy_evaluate_constraint_or_real_expr (z3_integration.ts:155:24)
-  //   at display_constraint_or_real_expr_with_evaluation (text_to_display.ts:894:28)
-  //   at call_display_func (block_playground.ts:133:20)
-  //   at block_playground.ts:150:36
-  //   at Object.call (editable.ts:68:26)
-  //   at Editable.notify (editable.ts:62:9)
-
   // const mi = generic_multi_input(
   //   TestId.generic_multi_input('eval'),
   //   TestId.single_input.eval,
@@ -928,9 +916,9 @@ const model_evaluators = (
     (logic) => split_input(logic, display_constraint_or_real_expr_with_evaluation, Constants.EVALUATOR_INPUT_PLACEHOLDER, test_ids.split))
   const mi = generic_input_block(eval_block, Constants.BATCH_EVALUATOR_INPUT_PLACEHOLDER, test_ids)
 
-  const refresh = () => {
+  const refresh = async () => {
     for (const input of eval_block.get_inputs()) {
-      input.text.set(input.text.get())
+      await input.text.set(input.text.get())
     }
   }
 
@@ -1046,7 +1034,7 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
   const regular_toggle = tel(TestId.regular_toggle, 'input', { type: 'checkbox', style: 'margin-left: 0.4em;' }, 'Regular') as HTMLInputElement
   const timeout_ms = new Editable(1000)
   const timeout_input = timeout(timeout_ms)
-  timeout_ms.watch((ms) => console.log('timeout set to:', ms))
+  timeout_ms.watch((ms) => { console.log('timeout set to:', ms) })
   const generate_line = el('div', { style: 'display: flex;' },
     generate_button,
     // el('input', { type: 'button', value: Constants.FIND_MODEL_BUTTON_LABEL, class: 'generate' }) as HTMLButtonElement,

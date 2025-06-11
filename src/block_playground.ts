@@ -44,7 +44,7 @@ export const split_input = <ParseOutput extends {}>(
   const newline_button = tel(test_ids.newline, 'input', { type: 'button', value: '⏎', class: 'newline' }) as HTMLButtonElement
   const info_button = el('input', { type: 'button' }) as HTMLButtonElement
   const textbox = tel(test_ids.input, 'input', { type: 'input', style: `width: ${placeholder_text.length}ch`, placeholder: placeholder_text, class: 'text' }) as HTMLInputElement
-  const output_container = el('span', {})
+  const output_container = tel(test_ids.output, 'span', {})
   const error_info_container = el('div', { class: 'error', style: 'margin-bottom: 0.4em;' }, 'error!')
   const info_container = el('div', { class: 'input-instructions' }, error_info_container, CONSTRAINT_INPUT_INSTRUCTIONS)
   const element = tel(test_ids.single.gen(), 'div', { class: 'single-input' },
@@ -132,6 +132,7 @@ export const split_input = <ParseOutput extends {}>(
     try {
       return await f(output)
     } catch (e: any) {
+      console.error(e)
       return el('span', { class: 'error' }, `Exception! ${e.message}`)
     }
   }

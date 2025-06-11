@@ -49,6 +49,7 @@ export type GenericMultiInputTestIds = {
     close: string
     input: string
     newline: string
+    output: string
   }>
 }
 
@@ -71,6 +72,7 @@ export const generic_multi_input = (prefix: 'constraints' | 'eval'): GenericMult
       close: `${id}-close`,
       input: `${id}-input`,
       newline: `${id}-newline`,
+      output: `${id}-output`,
     }),
   }
 }

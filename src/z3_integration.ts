@@ -141,7 +141,17 @@ export const fancy_evaluate_constraint_or_real_expr = async <CtxKey extends stri
     return { tag: 'undeclared-vars', variables: { sentence: [...free_sentence_vars], real: [...free_real_vars] } }
   }
 
-  // const model = solver.model()
+  const div0_constraints = div0_conditions_in_constraint_or_real_expr(c_or_re)
+  for (const c of div0_constraints) {
+    const translated = translate_constraint(tt, c)
+    const z3_expr = constraint_to_bool(ctx, model, translated)
+    const result = model.eval(z3_expr)
+    if (result.sexpr() === 'false') {
+      // found a denominator equal to zero!
+      return { tag: 'div0' }
+    }
+  }
+
   const translated_c_or_re = translate_constraint_or_real_expr(tt, c_or_re)
   const index_to_eliminate = tt.n_states() - 1  // TODO: put this in a function.
   const [_, eliminated] = eliminate_state_variable_index_in_constraint_or_real_expr(tt.n_states(), index_to_eliminate, translated_c_or_re)
@@ -519,7 +529,7 @@ const constraint_or_real_expr_to_z3_expr = <CtxKey extends string>(ctx: Context<
   }
 }
 
-const real_expr_to_arith = <CtxKey extends string>(ctx: Context<CtxKey>, model: Model<CtxKey>, expr: RealExpr): Arith<CtxKey> => {
+export const real_expr_to_arith = <CtxKey extends string>(ctx: Context<CtxKey>, model: Model<CtxKey>, expr: RealExpr): Arith<CtxKey> => {
   const sub = (expr: RealExpr): Arith<CtxKey> => real_expr_to_arith(ctx, model, expr)
   if (expr.tag === 'divide') {
     return ctx.Div(sub(expr.numerator), sub(expr.denominator))
@@ -554,7 +564,7 @@ const real_expr_to_arith = <CtxKey extends string>(ctx: Context<CtxKey>, model: 
   }
 }
 
-const constraint_to_bool = <CtxKey extends string>(ctx: Context<CtxKey>, model: Model<CtxKey>, c: Constraint): Bool<CtxKey> => {
+export const constraint_to_bool = <CtxKey extends string>(ctx: Context<CtxKey>, model: Model<CtxKey>, c: Constraint): Bool<CtxKey> => {
   const sub = (c: Constraint): Bool<CtxKey> => constraint_to_bool(ctx, model, c)
   const sub_real = (e: RealExpr): Arith<CtxKey> => real_expr_to_arith(ctx, model, e)
   if (c.tag === 'biconditional') {
@@ -576,7 +586,7 @@ const constraint_to_bool = <CtxKey extends string>(ctx: Context<CtxKey>, model: 
   } else if (c.tag === 'less_than_or_equal') {
     return ctx.LE(sub_real(c.left), sub_real(c.right))
   } else if (c.tag === 'negation') {
-    return ctx.Not(sub(c))
+    return ctx.Not(sub(c.constraint))
   } else if (c.tag === 'not_equal') {
     return ctx.Not(ctx.Eq(sub_real(c.left), sub_real(c.right)))
   } else {
