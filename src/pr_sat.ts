@@ -901,16 +901,18 @@ const eliminate_state_variable_index_in_constraint = (index: number, inverted_re
   } else if (c.tag === 'not_equal') {
     return { tag: 'not_equal', left: re(c.left), right: re(c.right) }
   } else {
-    const check: Equiv<typeof c, never> = true
-    void check
-    throw new Error('eliminate_state_variable_index_in_constraint fallthrough')
+    return fallthrough('eliminate_state_variable_index_in_constraint fallthrough', c)
   }
+}
+
+export const compute_inverted_redef = (n_states: number, index_to_eliminate: number): RealExprMap['state_variable_sum'] => {
+  return svs(Array(n_states).fill(0).map((_, i) => i).filter((e) => e !== index_to_eliminate))
 }
 
 // Returns [redef, new constraints]
 export const eliminate_state_variable_index = (n_states: number, index: number, constraints: Constraint[]): [RealExpr, Constraint[]] => {
   // a_1, ..., a_i, ..., a_n --> a_1, ..., a_n
-  const inverted_redef = svs(Array(n_states).fill(0).map((_, i) => i).filter((e) => e !== index))
+  const inverted_redef = compute_inverted_redef(n_states, index)
   const new_constraints = constraints.map((c) => eliminate_state_variable_index_in_constraint(index, inverted_redef, c))
   const redef = minus(lit(1), inverted_redef)
   const final_constraints = [
@@ -918,6 +920,18 @@ export const eliminate_state_variable_index = (n_states: number, index: number, 
     // eq(svs([index]), redef),
   ]
   return [redef, final_constraints]
+}
+
+export const eliminate_state_variable_index_in_constraint_or_real_expr = (n_states: number, index: number, c_or_re: ConstraintOrRealExpr): [RealExpr, ConstraintOrRealExpr] => {
+  const inverted_redef = compute_inverted_redef(n_states, index)
+  const redef = minus(lit(1), inverted_redef)
+  if (c_or_re.tag === 'constraint') {
+    return [redef, { tag: 'constraint', constraint: eliminate_state_variable_index_in_constraint(index, inverted_redef, c_or_re.constraint) }]
+  } else if (c_or_re.tag === 'real_expr') {
+    return [redef, { tag: 'real_expr', real_expr: eliminate_state_variable_index_in_real_expr(index, inverted_redef, c_or_re.real_expr) }]
+  } else {
+    return fallthrough('eliminate_state_variable_index_in_constraint_or_real_expr', c_or_re)
+  }
 }
 
 // Adds probability and division by zero constraints.
@@ -930,16 +944,19 @@ export const enrich_constraints = (tt: TruthTable, index_to_eliminate: number | 
   ]
 }
 
-const translate_constraints_to_smtlib = (tt: TruthTable, constraints: Constraint[]): S[] => {
+const translate_constraints_to_smtlib = (tt: TruthTable, index_to_eliminate: number, constraints: Constraint[]): S[] => {
   const smtlib_lines: S[] = []
   smtlib_lines.push(['set-logic', 'QF_NRA'])
 
-  for (const rv of tt.variables.real) {
+  for (const rv of tt.variables.real.entries()) {
     const declaration = ['declare-const', rv, 'Real']
     smtlib_lines.push(declaration)
   }
 
   for (const state_index of tt.state_indices()) {
+    if (state_index === index_to_eliminate) {
+      continue
+    }
     const declaration = ['declare-const', state_index_id(state_index), 'Real']
     smtlib_lines.push(declaration)
   }
@@ -950,8 +967,8 @@ const translate_constraints_to_smtlib = (tt: TruthTable, constraints: Constraint
     smtlib_lines.push(assertion)
   }
 
-  smtlib_lines.push(['check-sat'])
-  smtlib_lines.push(['get-model'])
+  // smtlib_lines.push(['check-sat'])
+  // smtlib_lines.push(['get-model'])
 
   return smtlib_lines
 }
@@ -1037,9 +1054,19 @@ export const parse_s = (str: string): S => {
   return s_lang.s.tryParse(str)
 }
 
-export const constraints_to_smtlib_string = (tt: TruthTable, constraints: Constraint[]): string => {
-  const smtlib_lines = translate_constraints_to_smtlib(tt, constraints)
-  return smtlib_lines.map((s) => s_to_string(s, false)).join('\n')
+export const constraints_to_smtlib_lines = (tt: TruthTable, index_to_eliminate: number, constraints: Constraint[]): S[] => {
+  const smtlib_lines = translate_constraints_to_smtlib(tt, index_to_eliminate, constraints)
+  return smtlib_lines
+}
+
+export const translate_constraint_or_real_expr = (tt: TruthTable, c_or_re: ConstraintOrRealExpr): ConstraintOrRealExpr => {
+  if (c_or_re.tag === 'constraint') {
+    return { tag: 'constraint', constraint: translate_constraint(tt, c_or_re.constraint) }
+  } else if (c_or_re.tag === 'real_expr') {
+    return { tag: 'real_expr', real_expr: translate_real_expr(tt, c_or_re.real_expr) }
+  } else {
+    return fallthrough('translate_constraint_or_real_expr', c_or_re)
+  }
 }
 
 export const translate_constraint = (tt: TruthTable, constraint: Constraint): Constraint => {

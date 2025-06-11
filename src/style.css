@@ -205,3 +205,11 @@ input::file-selector-button {
     opacity: 0;
   }
 }
+
+.header {
+  border-radius: 0.4em;
+  margin-bottom: 0.4em;
+  background-color: rgb(240, 240, 240);
+  /* width: fit-content; */
+  padding: 0.4em;
+}

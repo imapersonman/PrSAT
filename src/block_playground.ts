@@ -37,16 +37,17 @@ export const split_input = <ParseOutput extends {}>(
   logic: SingleInputLogic<ParseOutput, SplitInput>,
   display: (output: ParseOutput) => Promise<Element>,
   placeholder_text: string,
-  test_id_gen: TestIdGenerator,
+  // test_id_gen: TestIdGenerator,
+  test_ids: TestId.GenericMultiInputTestIds['split'],
 ): SplitInput => {
-  const delete_button = tel(TestId.single_input.close, 'input', { type: 'button', value: '⌫', class: 'close' }) as HTMLButtonElement
-  const newline_button = tel(TestId.single_input.newline, 'input', { type: 'button', value: '⏎', class: 'newline' }) as HTMLButtonElement
+  const delete_button = tel(test_ids.close, 'input', { type: 'button', value: '⌫', class: 'close' }) as HTMLButtonElement
+  const newline_button = tel(test_ids.newline, 'input', { type: 'button', value: '⏎', class: 'newline' }) as HTMLButtonElement
   const info_button = el('input', { type: 'button' }) as HTMLButtonElement
-  const textbox = tel(TestId.single_input.input, 'input', { type: 'input', style: `width: ${placeholder_text.length}ch`, placeholder: placeholder_text, class: 'text' }) as HTMLInputElement
+  const textbox = tel(test_ids.input, 'input', { type: 'input', style: `width: ${placeholder_text.length}ch`, placeholder: placeholder_text, class: 'text' }) as HTMLInputElement
   const output_container = el('span', {})
   const error_info_container = el('div', { class: 'error', style: 'margin-bottom: 0.4em;' }, 'error!')
   const info_container = el('div', { class: 'input-instructions' }, error_info_container, CONSTRAINT_INPUT_INSTRUCTIONS)
-  const element = tel(test_id_gen.gen(), 'div', { class: 'single-input' },
+  const element = tel(test_ids.single.gen(), 'div', { class: 'single-input' },
     delete_button,
     textbox,
     newline_button,
@@ -54,7 +55,7 @@ export const split_input = <ParseOutput extends {}>(
     output_container,
     info_container)
 
-  const remove = (): boolean => {
+  const remove = async (): Promise<boolean> => {
     const start_pos = textbox.selectionStart
     const end_pos = textbox.selectionEnd
     if (start_pos === 0 && end_pos === 0) {
@@ -62,7 +63,7 @@ export const split_input = <ParseOutput extends {}>(
       const replacement = logic.remove()
       if (replacement !== undefined) {
         const old_replacement_line_length = replacement.text.get().length
-        replacement.text.set(`${replacement.text.get()}${textbox.value}`)
+        await replacement.text.set(`${replacement.text.get()}${textbox.value}`)
         replacement.set_focused()
         replacement.associate.set_cursor(old_replacement_line_length)
         return true
@@ -88,13 +89,13 @@ export const split_input = <ParseOutput extends {}>(
     event.stopPropagation()
   }
 
-  textbox.onkeydown = (event) => {
+  textbox.onkeydown = async (event) => {
     if (event.key === 'Enter') {
       const cursor_position = assert_exists(textbox.selectionEnd, 'While trying to get cursor position, ArrowUp event called when textbox not focused')
       const [first_part, second_part] = split_at_position(textbox.value, cursor_position)  // using textbox value because text might be out of date because of debouncing!
       const next = logic.then_insert()
-      next.text.set(second_part)
-      logic.text.set(first_part)
+      await next.text.set(second_part)
+      await logic.text.set(first_part)
       next.associate.set_cursor(0)
       next.set_focused()
       event.preventDefault()
@@ -109,7 +110,7 @@ export const split_input = <ParseOutput extends {}>(
       n?.associate.set_cursor(cursor_position)
       event.preventDefault()
     } else if (event.key === 'Backspace') {
-      if (remove()) {
+      if (await remove()) {
         event.preventDefault()
       }
     }
@@ -127,13 +128,26 @@ export const split_input = <ParseOutput extends {}>(
     delete_button.disabled = !has_siblings
   })
 
+  const call_display_func = async (f: (output: ParseOutput) => Promise<Element>, output: ParseOutput): Promise<Element> => {
+    try {
+      return await f(output)
+    } catch (e: any) {
+      return el('span', { class: 'error' }, `Exception! ${e.message}`)
+    }
+  }
+
   logic.on_state_change(async (state) => {
     output_container.innerHTML = ''
     output_container.style.display = 'none'
     error_info_container.innerHTML = ''
 
     if (state.tag === 'parsed') {
-      const output_element = await display(state.output)
+      // The following call is resulting in an exception and I think I know why.
+      // It looks as if z3 is getting angry because we're trying to evaluate multiple expressions simultaneously.
+      // Javascript code is single-threaded, but webassembly is not, and Z3 doesn't like running multiple promises at the same time.
+      // Some kind of queuing system to wrap z3 is necessary.
+      // LAME.
+      const output_element = await call_display_func(display, state.output)
       output_container.appendChild(output_element)
       output_container.style.display = 'inline'
       info_button.value = INFO_MESSAGE_OKAY
@@ -148,13 +162,18 @@ export const split_input = <ParseOutput extends {}>(
     } else {
       fallthrough('split_input.logic.on_state_change', state)
     }
-  }).call()
+  }).call().catch(() => {
+    throw new Error('Shouldn\'t have an error!')
+  })
 
   textbox.addEventListener('input', debounce(DEFAULT_DEBOUNCE_MS, {
     lead: () => output_container.classList.add('updating'),
     trail: () => {
       output_container.classList.remove('updating')
       logic.text.set(textbox.value)
+        .catch(() => {
+          throw new Error('Should not throw!')
+        })
     },
   }))
 
@@ -166,7 +185,7 @@ export const split_input = <ParseOutput extends {}>(
     }
   })
 
-  logic.text.watch((text) => {
+  logic.text.watch(async (text) => {
     textbox.value = text
     if (textbox.value.length < placeholder_text.length) {
       textbox.style.width = `${placeholder_text.length}ch`
@@ -243,21 +262,26 @@ const split_input_block = <ParseOutput extends {}>(
 const batch_input_block = <ParseOutput extends {}>(
   batch_logic: BatchInputLogic<ParseOutput, SplitInput>,
   placeholder_text: string,
+  test_ids: TestId.GenericMultiInputTestIds,
 ): InputBlock => {
-  const textbox = el('textarea', { placeholder: placeholder_text, style: 'display: block; border-radius: 0.4em;', rows: '10', cols: '50' }) as HTMLTextAreaElement
-  const parse_button = button('⇩ Parse', { style: 'margin-right: 0.4em;' })
+  const textbox = tel(test_ids.batch.textbox, 'textarea', { placeholder: placeholder_text, style: 'display: block; border-radius: 0.4em;', rows: '10', cols: '50' }) as HTMLTextAreaElement
+  const parse_button = button('⇩ Parse', { style: 'margin-right: 0.4em;' }, test_ids.batch.parse)
 
-  parse_button.onclick = () => {
-    batch_logic.send()
+  parse_button.onclick = async () => {
+    console.log('parsed stuff yeah!', batch_logic.text.get())
+    await batch_logic.send()
     batch_logic.text.set('')
     textbox.value = ''
   }
 
-  textbox.addEventListener('input', debounce(DEFAULT_DEBOUNCE_MS, {
-    trail: () => {
-      batch_logic.text.set(textbox.value)
-    },
-  }))
+  // textbox.addEventListener('input', debounce(DEFAULT_DEBOUNCE_MS, {
+  //   trail: () => {
+  //     batch_logic.text.set(textbox.value)
+  //   },
+  // }))
+  textbox.addEventListener('input', () => {
+    batch_logic.text.set(textbox.value)
+  })
 
   const element = el('div', { class: 'batch-input', style: 'width: fit-content;' },
     textbox,
@@ -274,16 +298,21 @@ const batch_input_block = <ParseOutput extends {}>(
   }
 }
 
-const button = (label: string, attrs: Record<string, string> = {}): HTMLButtonElement => {
-  return el('input', { ...attrs, type: 'button', value: label }) as HTMLButtonElement
+const button = (label: string, attrs: Record<string, string> = {}, test_id?: string): HTMLButtonElement => {
+  if (test_id === undefined) {
+    return el('input', { ...attrs, type: 'button', value: label }) as HTMLButtonElement
+  } else {
+    return tel(test_id, 'input', { ...attrs, type: 'button', value: label }) as HTMLButtonElement
+  }
 }
 
 export const generic_input_block = <ParseOutput extends {}>(
   block: InputBlockLogic<ParseOutput, SplitInput>,
   batch_placeholder_text: string,
+  test_ids: TestId.GenericMultiInputTestIds,
 ): InputBlock => {
   const batch_logic = new BatchInputLogic(block)
-  const batch_block = batch_input_block(batch_logic, batch_placeholder_text)
+  const batch_block = batch_input_block(batch_logic, batch_placeholder_text, test_ids)
   const split_block = split_input_block(block)
 
   const file_loader = el('input', { type: 'file', style: 'display: none;' }) as HTMLInputElement
@@ -291,7 +320,7 @@ export const generic_input_block = <ParseOutput extends {}>(
   const save_button = button('Save to File')
   const copy_button = button('Copy to Clipboard', { style: 'margin-left: 0.4em;' })
   const copy_message_container = el('span', { style: 'margin-left: 0.4em;', class: 'copy-message' }, 'Copied Constraints!')
-  const show_batch_button = button('')
+  const show_batch_button = button('', {}, test_ids.toggle)
 
   const show_batch_block = new Editable(true)
   make_hideable(batch_block.element, show_batch_block)
@@ -333,7 +362,7 @@ export const generic_input_block = <ParseOutput extends {}>(
     assert(files.length === 1, `Number of files in file_loader != 1!\nactually: ${files.length}`)
     const f = assert_exists(files[0], 'files[0] is null!')
     batch_logic.text.set(await f.text())
-    batch_logic.send()
+    await batch_logic.send()
   }
 
   const element = el('div', { class: 'generic-input-block' },

@@ -1,6 +1,10 @@
 import { describe, test, expect } from 'vitest'
 import { ModelAssignmentOutput, parse_to_assignment, poly_s } from './z3_integration'
 import { S } from './s'
+import { ConstraintOrRealExpr, PrSat } from './types'
+import { TruthTable, VariableLists } from './pr_sat'
+import { Res } from './utils'
+import { Model } from 'z3-solver'
 
 describe('parse_to_assignment', () => {
   describe('root-obj', () => {
@@ -90,4 +94,7 @@ describe('parse_to_assignment', () => {
       expect(parsed).toEqual(expected)
     })
   })
+})
+
+describe('Z3Instance', () => {
 })

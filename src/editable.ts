@@ -2,7 +2,13 @@ import { DLL, DLLElement } from './dll'
 import { assert, assert_exists } from "./utils"
 
 export interface Watcher<T> {
-  call(old?: T): void
+  call(old?: T): undefined
+  unwatch(): void
+  // then_watch(f: (value: T, old?: T) => boolean): Watcher<T>
+}
+
+export interface AsyncWatcher<T> {
+  call(old?: T): Promise<undefined>
   unwatch(): void
   // then_watch(f: (value: T, old?: T) => boolean): Watcher<T>
 }
@@ -43,6 +49,38 @@ export interface rEditable<T> {
   watch(f: (value: T, old?: T) => void): Watcher<T>
 }
 
+export class AsyncEditable<T> {
+  private watchers = new Set<AsyncWatcher<T>>()
+
+  constructor(private value: T) {}
+
+  get(): T { return this.value }
+
+  async set(value: T): Promise<void> {
+    const old = this.value
+    this.value = value
+    await this.notify(value, old)
+  }
+
+  private async notify(new_value: T, old_value?: T) {
+    this.value = new_value
+    for (const [_, w] of this.watchers.entries()) {
+      await w.call(old_value)
+    }
+  }
+
+  watch(f: (value: T, old?: T) => Promise<undefined>): AsyncWatcher<T> {
+    const w = {
+      call: async (old?: T) => await f(this.get(), old),
+      unwatch: () => this.watchers.delete(w),
+    }
+    this.watchers.add(w)
+    return w
+  }
+
+  cleanup() { this.watchers.clear() }
+}
+
 export class Editable<T> implements rEditable<T> {
   private watchers = new Set<Watcher<T>>()
 
@@ -63,7 +101,7 @@ export class Editable<T> implements rEditable<T> {
     }
   }
 
-  watch(f: (value: T, old?: T) => void): Watcher<T> {
+  watch(f: (value: T, old?: T) => undefined): Watcher<T> {
     const w = {
       call: (old?: T) => f(this.get(), old),
       unwatch: () => this.watchers.delete(w),

@@ -1,10 +1,10 @@
-import { Context, Expr, init, Model, Z3HighLevel, Z3LowLevel } from "z3-solver"
+import { Arith, Bool, Context, Expr, init, Model, Solver, Z3HighLevel, Z3LowLevel } from "z3-solver"
 import { match_s, S, spv, clause, s_to_string, default_clause } from "./s"
-import { constraints_to_smtlib_string, eliminate_state_variable_index, enrich_constraints, parse_s, real_expr_to_smtlib, translate, TruthTable, variables_in_constraints, state_index_id, constraint_to_smtlib, translate_constraint, translate_real_expr, free_variables_in_constraint_or_real_expr as free_sentence_variables_in_constraint_or_real_expr, LetterSet, free_real_variables_in_constraint_or_real_expr, VariableLists, div0_conditions_in_constraint_or_real_expr } from "./pr_sat"
+import { constraints_to_smtlib_lines, eliminate_state_variable_index, enrich_constraints, parse_s, real_expr_to_smtlib, translate, TruthTable, variables_in_constraints, state_index_id, constraint_to_smtlib, translate_constraint, translate_real_expr, free_variables_in_constraint_or_real_expr as free_sentence_variables_in_constraint_or_real_expr, LetterSet, free_real_variables_in_constraint_or_real_expr, VariableLists, div0_conditions_in_constraint_or_real_expr, translate_constraint_or_real_expr, eliminate_state_variable_index_in_constraint_or_real_expr } from "./pr_sat"
 import { ConstraintOrRealExpr, PrSat } from "./types"
 import { as_array, assert, assert_exists, assert_result, fallthrough, Res } from "./utils"
 
-// type RealExpr = PrSat['RealExpr']
+type RealExpr = PrSat['RealExpr']
 type Constraint = PrSat['Constraint']
 
 export const init_z3 = async (): Promise<Z3HighLevel & Z3LowLevel> => {
@@ -72,6 +72,7 @@ export type FancyEvaluatorOutput =
   | { tag: 'undeclared-vars', variables: VariableLists }
   | { tag: 'div0' }
   | { tag: 'result', result: ModelAssignmentOutput }
+  | { tag: 'bool-result', result: boolean }
 
 // const constraint_contains_div0 = (c: Constraint): boolean => {
 //   const sub = constraint_contains_div0
@@ -131,11 +132,8 @@ export type FancyEvaluatorOutput =
 //   }
 // }
 
-export const fancy_evaluate_constraint_or_real_expr = async <CtxKey extends string>(ctx: Context<CtxKey>, tt: TruthTable, model_outputs: Record<number, ModelAssignmentOutput>, c_or_re: ConstraintOrRealExpr): Promise<FancyEvaluatorOutput> => {
-  const { Solver } = ctx
-  const solver = new Solver()
-  const lines: S[] = []
-
+// The given Solver should already have all the other variables inside it declared but if not I will CRY.
+export const fancy_evaluate_constraint_or_real_expr = async <CtxKey extends string>(ctx: Context<CtxKey>, model: Model<CtxKey>, tt: TruthTable, c_or_re: ConstraintOrRealExpr): Promise<FancyEvaluatorOutput> => {
   const free_sentence_vars = free_sentence_variables_in_constraint_or_real_expr(c_or_re, new LetterSet(), new LetterSet([...tt.letters()]))
   const free_real_vars = free_real_variables_in_constraint_or_real_expr(c_or_re, new Set)
 
@@ -143,42 +141,21 @@ export const fancy_evaluate_constraint_or_real_expr = async <CtxKey extends stri
     return { tag: 'undeclared-vars', variables: { sentence: [...free_sentence_vars], real: [...free_real_vars] } }
   }
 
-  for (const [state_index, output] of Object.entries(model_outputs)) {
-    const index = assert_result(parse_int(state_index))
-    const id = state_index_id(index)
-    lines.push(['declare-const', id, 'Real'])
-
-    const output_as_s = model_assignment_output_to_s(output)
-    lines.push(['assert', ['=', id, output_as_s]])
+  // const model = solver.model()
+  const translated_c_or_re = translate_constraint_or_real_expr(tt, c_or_re)
+  const index_to_eliminate = tt.n_states() - 1  // TODO: put this in a function.
+  const [_, eliminated] = eliminate_state_variable_index_in_constraint_or_real_expr(tt.n_states(), index_to_eliminate, translated_c_or_re)
+  const to_evaluate_z3 = constraint_or_real_expr_to_z3_expr(ctx, model, eliminated)
+  if (c_or_re.tag === 'constraint') {
+    const result = model.eval(to_evaluate_z3, true)
+    const s = result.sexpr()
+    return { tag: 'bool-result', result: s === 'true' }
   }
 
-  const div0_constraints = div0_conditions_in_constraint_or_real_expr(c_or_re)
-  for (const c of div0_constraints) {
-    const translated = translate_constraint(tt, c)
-    const as_smtlib = constraint_to_smtlib(translated)
-    lines.push(['assert', as_smtlib])
-  }
+  const output = await expr_to_assignment(ctx, model, to_evaluate_z3)
+  console.log('RESULT', output)
 
-  const c_or_re_as_s = constraint_or_real_expr_to_smtlib(tt, c_or_re)
-  const result_index = tt.n_states() + 1
-  const result_id = state_index_id(result_index)  // Here's to hoping '_' isn't used as an id haha oops.
-  const type = c_or_re.tag === 'constraint' ? 'Bool' : 'Real'
-  lines.push(['declare-const', result_id, type])
-  lines.push(['assert', ['=', result_id, c_or_re_as_s]])
-
-  const smtlib_string = lines.map((s) => s_to_string(s, false)).join('\n')
-  console.log(smtlib_string)
-  solver.fromString(smtlib_string)
-  const result = await solver.check()
-
-  if (result === 'sat') {
-    const z3_model = solver.model()
-    const full_model = await model_to_assignments(ctx, z3_model)
-    const final_result = assert_exists(full_model[result_index], 'Missing result index!')
-    return { tag: 'result', result: final_result }
-  } else {
-    return { tag: 'div0' }
-  }
+  return { tag: 'result', result: output }
 }
 
 const int_to_s = (i: number): S => {
@@ -386,8 +363,9 @@ export const parse_to_assignment = (s: S): ModelAssignmentOutput => {
   const [a, b] = [spv('a'), spv('b')]
   return match_s(s, [
     clause<{ a: 'string' }, ModelAssignmentOutput>({ a: 'string' }, a, (m) => {
-      const value = assert_result(parse_float(m('a')))
-      return { tag: 'literal', value }
+      const ma = m('a')
+      const as_float = assert_result(parse_float(ma))
+      return { tag: 'literal', value: as_float }
     }),
     clause<{ a: 'string' }, ModelAssignmentOutput>({ a: 'string' }, ['-', a], (m) => {
       const inner = parse_to_assignment(m('a'))
@@ -493,6 +471,7 @@ export const model_assignment_output_to_s = (output: ModelAssignmentOutput): S =
 
 const expr_to_assignment = async <CtxKey extends string>(ctx: Context<CtxKey>, model: Model<CtxKey>, expr: Expr<CtxKey>): Promise<ModelAssignmentOutput> => {
   const value_expr = await ctx.simplify(model.eval(expr))
+  // const value_expr = await ctx.simplify(ctx.Real.val(-2138))
   const parsed_s = parse_s(value_expr.sexpr())
   const value = parse_to_assignment(parsed_s)
   return value
@@ -530,51 +509,89 @@ export const model_to_assignments = async <CtxKey extends string>(ctx: Context<C
   return assignments_map
 }
 
-// const real_expr_to_arith = <CtxKey extends string>(ctx: Context<CtxKey>, model: Model<CtxKey>, expr: RealExpr): Arith<CtxKey> => {
-//   const sub = (expr: RealExpr): Arith<CtxKey> => real_expr_to_arith(ctx, model, expr)
-//   if (expr.tag === 'divide') {
-//     return ctx.Div(sub(expr.numerator), sub(expr.denominator))
-//   } else if (expr.tag === 'given_probability') {
-//     throw new Error('Unable to convert conditional probability to a Z3 arith expression!')
-//   } else if (expr.tag === 'literal') {
-//     return ctx.Real.val(expr.value)
-//   } else if (expr.tag === 'minus') {
-//     return ctx.Sub(sub(expr.left), sub(expr.right))
-//   } else if (expr.tag === 'multiply') {
-//     return ctx.Product(sub(expr.left), sub(expr.right))
-//   } else if (expr.tag === 'negative') {
-//     return ctx.Neg(sub(expr.expr))
-//   } else if (expr.tag === 'plus') {
-//     return ctx.Sum(sub(expr.left), sub(expr.right))
-//   } else if (expr.tag === 'power') {
-//     throw new Error('Unable to convert exponent to Z3 arith expression (be careful where real_expr_to_arith is called!)')
-//   } else if (expr.tag === 'probability') {
-//     throw new Error('Unable to convert probability to a Z3 arith expression!')
-//   } else if (expr.tag === 'state_variable_sum') {
-//     if (expr.indices.length === 0) {
-//       return ctx.Real.val(0)
-//     } else {
-//       const first_var_expr = assert_exists(model.eval(ctx.Var()))
-//       const rest_var_exprs = expr.indices.map((index) => assert_exists(index_to_var_map[expr.indices[index]]))
-//       return ctx.Sum(first_var_expr, ...rest_vars_exprs)
-//     }
-//   } else if (expr.tag === 'variable') {
-//     throw new Error('Unable to convert variable to Z3 arith expression (be careful where real_expr_to_arith is called!)')
-//   } else {
-//     const check: Equiv<typeof expr, never> = true
-//     void check
-//     throw new Error('real_expr_to_arith fallthrough!')
-//   }
-// }
+const constraint_or_real_expr_to_z3_expr = <CtxKey extends string>(ctx: Context<CtxKey>, model: Model<CtxKey>, c_or_re: ConstraintOrRealExpr): Expr<CtxKey> => {
+  if (c_or_re.tag === 'constraint') {
+    return constraint_to_bool(ctx, model, c_or_re.constraint)
+  } else if (c_or_re.tag === 'real_expr') {
+    return real_expr_to_arith(ctx, model, c_or_re.real_expr)
+  } else {
+    return fallthrough('constraint_or_real_expr_to_z3_expr', c_or_re)
+  }
+}
+
+const real_expr_to_arith = <CtxKey extends string>(ctx: Context<CtxKey>, model: Model<CtxKey>, expr: RealExpr): Arith<CtxKey> => {
+  const sub = (expr: RealExpr): Arith<CtxKey> => real_expr_to_arith(ctx, model, expr)
+  if (expr.tag === 'divide') {
+    return ctx.Div(sub(expr.numerator), sub(expr.denominator))
+  } else if (expr.tag === 'given_probability') {
+    throw new Error('Unable to convert conditional probability to a Z3 arith expression!')
+  } else if (expr.tag === 'literal') {
+    return ctx.Real.val(expr.value)
+  } else if (expr.tag === 'minus') {
+    return ctx.Sub(sub(expr.left), sub(expr.right))
+  } else if (expr.tag === 'multiply') {
+    return ctx.Product(sub(expr.left), sub(expr.right))
+  } else if (expr.tag === 'negative') {
+    return ctx.Neg(sub(expr.expr))
+  } else if (expr.tag === 'plus') {
+    return ctx.Sum(sub(expr.left), sub(expr.right))
+  } else if (expr.tag === 'power') {
+    throw new Error('Unable to convert exponent to Z3 arith expression (be careful where real_expr_to_arith is called!)')
+  } else if (expr.tag === 'probability') {
+    throw new Error('Unable to convert probability to a Z3 arith expression!')
+  } else if (expr.tag === 'state_variable_sum') {
+    if (expr.indices.length === 0) {
+      return ctx.Real.val(0)
+    } else {
+      const first_var_expr = model.eval(ctx.Const(state_index_id(assert_exists(expr.indices[0], 'Missing expr.indices[0] for some reason!')), ctx.Real.sort()))
+      const rest_var_exprs = expr.indices.slice(1).map((state_index) => (ctx.Const(state_index_id(state_index), ctx.Real.sort())))
+      return ctx.Sum(first_var_expr, ...rest_var_exprs)
+    }
+  } else if (expr.tag === 'variable') {
+    throw new Error('Unable to convert variable to Z3 arith expression (be careful where real_expr_to_arith is called!)')
+  } else {
+    return fallthrough('real_expr_to_arith', expr)
+  }
+}
+
+const constraint_to_bool = <CtxKey extends string>(ctx: Context<CtxKey>, model: Model<CtxKey>, c: Constraint): Bool<CtxKey> => {
+  const sub = (c: Constraint): Bool<CtxKey> => constraint_to_bool(ctx, model, c)
+  const sub_real = (e: RealExpr): Arith<CtxKey> => real_expr_to_arith(ctx, model, e)
+  if (c.tag === 'biconditional') {
+    return ctx.Iff(sub(c.left), sub(c.right))
+  } else if (c.tag === 'conditional') {
+    return ctx.Implies(sub(c.left), sub(c.right))
+  } else if (c.tag === 'conjunction') {
+    return ctx.And(sub(c.left), sub(c.right))
+  } else if (c.tag === 'disjunction') {
+    return ctx.Or(sub(c.left), sub(c.right))
+  } else if (c.tag === 'equal') {
+    return ctx.Eq(sub_real(c.left), sub_real(c.right))
+  } else if (c.tag === 'greater_than') {
+    return ctx.GT(sub_real(c.left), sub_real(c.right))
+  } else if (c.tag === 'greater_than_or_equal') {
+    return ctx.GE(sub_real(c.left), sub_real(c.right))
+  } else if (c.tag === 'less_than') {
+    return ctx.LT(sub_real(c.left), sub_real(c.right))
+  } else if (c.tag === 'less_than_or_equal') {
+    return ctx.LE(sub_real(c.left), sub_real(c.right))
+  } else if (c.tag === 'negation') {
+    return ctx.Not(sub(c))
+  } else if (c.tag === 'not_equal') {
+    return ctx.Not(ctx.Eq(sub_real(c.left), sub_real(c.right)))
+  } else {
+    return fallthrough('constraint_to_bool', c)
+  }
+}
 
 export type SolverOptions = {
   regular: boolean
   timeout_ms: number
 }
 
-export type SolverReturn =
-  | { status: 'sat', all_constraints: Constraint[], tt: TruthTable, state_values: Record<number, number>, model: Record<number, ModelAssignmentOutput> }
-  | { status: 'unsat' | 'unknown', all_constraints: Constraint[], tt: TruthTable, state_values: Record<number, number>, model: undefined }
+export type SolverReturn<CtxKey extends string> =
+  | { status: 'sat', all_constraints: Constraint[], tt: TruthTable, z3_model: Model<CtxKey>, model: Record<number, ModelAssignmentOutput>, solver: Solver<CtxKey> }
+  | { status: 'unsat' | 'unknown', all_constraints: Constraint[], tt: TruthTable, model: undefined }
 
 const DEFAULT_SOLVER_OPTIONS: SolverOptions = {
   regular: false,
@@ -589,10 +606,10 @@ export const pr_sat_with_options = async <CtxKey extends string>(
   tt: TruthTable,
   constraints: Constraint[],
   options?: Partial<SolverOptions>,
-): Promise<SolverReturn> => {
+): Promise<SolverReturn<CtxKey>> => {
   const { regular, timeout_ms } = { ...DEFAULT_SOLVER_OPTIONS, ...options }
   const { Solver } = ctx
-  const solver = new Solver();
+  const solver = new Solver('QF_NRA');
   solver.set("timeout", timeout_ms)
 
   const translated = translate(tt, constraints)
@@ -601,48 +618,31 @@ export const pr_sat_with_options = async <CtxKey extends string>(
   const enriched_constraints = enrich_constraints(tt, index_to_eliminate, regular, translated)
   const [redef, elim_constraints] = eliminate_state_variable_index(tt.n_states(), index_to_eliminate, enriched_constraints)
 
-  const smtlib_string = constraints_to_smtlib_string(tt, elim_constraints)
-  // console.log(smtlib_string)
+  const smtlib_lines = [
+    ...constraints_to_smtlib_lines(tt, index_to_eliminate, elim_constraints),
+    ['define-fun', `s_${index_to_eliminate}`, [], 'Real', real_expr_to_smtlib(redef)],
+  ]
+  const smtlib_string = smtlib_lines.map((l) => s_to_string(l, false)).join('\n')
+  console.log(smtlib_string)
   solver.fromString(smtlib_string)
   const result = await solver.check()
 
   if (result === 'sat') {
-    const model = solver.model();
-    // const other_state_values = await model_to_state_values(ctx, model)
-    // const state_values = {
-    //   ...other_state_values,
-    //   [index_to_eliminate]: evaluate_real_expr(tt, other_state_values, redef),
-    // }
-    // const validation = validate_model(translated, state_values, tt)
-    // if (!validation.every((v) => v)) {
-    //   console.log(validation)
-    //   console.log(state_values)
-    //   console.log(translated.map(constraint_to_string))
-    //   throw new Error('Constraints found to be satisfiable but the internal check for satisfiability given the model failed!')
-    // }
+    const model = solver.model()
 
-    const assigned_exprs = await model_to_assigned_exprs(ctx, model)
-    const next_solver_commands: S[] = []
-    for (const [state_index, expr] of assigned_exprs) {
-      const v = `s_${state_index}`
-      next_solver_commands.push(['declare-const', v, 'Real'])
-      next_solver_commands.push(['assert', ['=', v, parse_s(expr.sexpr())]])
+    const elim_var_value = await fancy_evaluate_constraint_or_real_expr(ctx, model, tt, { tag: 'real_expr', real_expr: redef })
+    if (elim_var_value.tag !== 'result') {
+      throw new Error('Oh no error when trying to calculate eliminated variable!')
     }
-    next_solver_commands.push(['declare-const', `s_${index_to_eliminate}`, 'Real'])
-    next_solver_commands.push(['assert', ['=', `s_${index_to_eliminate}`, real_expr_to_smtlib(redef)]])
-    const next_solver_smtlib_string = next_solver_commands.map((s) => s_to_string(s, false)).join('\n')
-    const next_solver = new Solver()
-    next_solver.fromString(next_solver_smtlib_string)
-    const result = await next_solver.check()
-    assert(result === 'sat')
-    const final_model = next_solver.model()
-    const assignments = await model_to_assignments(ctx, final_model)
 
-    return { status: 'sat', all_constraints: translated, tt, state_values: {}, model: assignments }
+    const assignments = {
+      ...await model_to_assignments(ctx, model),
+      [index_to_eliminate]: elim_var_value.result,
+    }
+    return { status: 'sat', all_constraints: translated, tt, z3_model: model, model: assignments, solver }
   } else {
-    return { status: result, all_constraints: translated, tt, state_values: {}, model: undefined }
+    return { status: result, all_constraints: translated, tt, model: undefined }
   }
-
 }
 
 export const pr_sat_with_truth_table = async <CtxKey extends string>(
@@ -650,7 +650,7 @@ export const pr_sat_with_truth_table = async <CtxKey extends string>(
   tt: TruthTable,
   constraints: Constraint[],
   regular: boolean = false,
-): Promise<SolverReturn> => {
+): Promise<SolverReturn<CtxKey>> => {
   return await pr_sat_with_options(ctx, tt, constraints, { regular })
 }
 
@@ -658,8 +658,7 @@ export const pr_sat = async <CtxKey extends string>(
   ctx: Context<CtxKey>,
   constraints: Constraint[],
   regular: boolean = false,
-): Promise<SolverReturn> => {
+): Promise<SolverReturn<CtxKey>> => {
   const tt = new TruthTable(variables_in_constraints(constraints))
   return pr_sat_with_truth_table(ctx, tt, constraints, regular)
 }
-

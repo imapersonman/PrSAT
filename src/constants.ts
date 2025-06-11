@@ -53,3 +53,5 @@ export const SAT = 'Constraints are SATisfiable!'
 export const UNSAT = 'Constraints are UNSATisfiable!'
 export const UNKNOWN = 'Unable to determine if constraints are satisfiable'
 
+export const SEARCH = 'Searching for model satisfying constraints...'
+

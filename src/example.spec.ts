@@ -486,4 +486,7 @@ describe('smtlib-direct', () => {
     const result = await s.check()
     expect(result).toEqual('sat')
   })
+
+  test('continuing Solver instance', () => {
+  })
 })

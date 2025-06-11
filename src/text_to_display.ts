@@ -1,10 +1,10 @@
-import { Context } from "z3-solver";
+import { Context, Model, Solver } from "z3-solver";
 import { Editable, rEditable } from './editable';
 import { el, math_el, tel } from "./el";
 import { assert, assert_exists, fallthrough } from "./utils";
 import { parse_constraint, parse_constraint_or_real_expr } from "./parser";
 import { constraint_to_string, letter_string, TruthTable, variables_in_constraints } from "./pr_sat";
-import { fancy_evaluate_constraint_or_real_expr, FancyEvaluatorOutput, init_z3, ModelAssignmentOutput, pr_sat_with_truth_table } from "./z3_integration";
+import { fancy_evaluate_constraint_or_real_expr, FancyEvaluatorOutput, init_z3, ModelAssignmentOutput, pr_sat_with_options, pr_sat_with_truth_table } from "./z3_integration";
 import { s_to_string } from "./s";
 import { ConstraintOrRealExpr, PrSat } from "./types";
 import { Equiv } from "./tag_map";
@@ -16,6 +16,7 @@ import * as TestId from '../tests/test_ids'
 import * as Constants from './constants'
 
 import './style.css'
+import { onTestFinished } from "vitest";
 
 const root = assert_exists(document.getElementById('app'), 'Root element with id \'#app\' doesn\'t exist!')
 
@@ -770,10 +771,10 @@ const model_display = (tt: TruthTable, model_assignments: Record<number, ModelAs
 type ModelFinderState =
   | { tag: 'waiting' }
   | { tag: 'looking', truth_table: TruthTable }
-  | { tag: 'sat', truth_table: TruthTable, assignments: Record<number, ModelAssignmentOutput>, state_values: Record<number, number> }
+  | { tag: 'sat', truth_table: TruthTable, model: Model, assignments: Record<number, ModelAssignmentOutput> }
   | { tag: 'unsat', truth_table: TruthTable }
   | { tag: 'unknown' }
-  | { tag: 'invalidated', last: { truth_table: TruthTable, state_values: Record<number, number> } }
+  | { tag: 'invalidated', last: { truth_table: TruthTable } }
 
 type ModelFinderDisplay = {
   element: HTMLElement
@@ -855,6 +856,8 @@ type ModelEvaluator = {
 const fancy_evaluator_result_to_display = (output: FancyEvaluatorOutput): Node => {
   if (output.tag === 'result') {
     return model_assignment_display(output.result)
+  } else if (output.tag === 'bool-result') {
+    return math_el('mtext', {}, output.result ? '⊤' : '⊥')
   } else if (output.tag === 'undeclared-vars') {
     const fv_str = [...output.variables.real, ...output.variables.sentence].map((v) => {
       if (typeof v === 'string') {
@@ -871,7 +874,10 @@ const fancy_evaluator_result_to_display = (output: FancyEvaluatorOutput): Node =
   }
 }
 
-const model_evaluators = (z3_state_box: Editable<Z3ContextState>, model_assignments: rEditable<{ truth_table: TruthTable, values: Record<number, ModelAssignmentOutput> } | undefined>): ModelEvaluator => {
+const model_evaluators = (
+  z3_state_box: Editable<Z3ContextState>,
+  model_assignments: rEditable<{ truth_table: TruthTable, model: Model, values: Record<number, ModelAssignmentOutput> } | undefined>,
+): ModelEvaluator => {
   const display_constraint_or_real_expr_with_evaluation = async (e: ConstraintOrRealExpr): Promise<Element> => {
     const d = display_constraint_or_real_expr(e, false)
     const assignments = model_assignments.get()
@@ -884,7 +890,8 @@ const model_evaluators = (z3_state_box: Editable<Z3ContextState>, model_assignme
       if (z3_state.tag !== 'ready') {
         throw new Error('Trying to evaluate model that isn\'t ready!')
       }
-      const result = await fancy_evaluate_constraint_or_real_expr(z3_state.ctx, assignments.truth_table, assignments.values, e)  // Could throw!
+      // const result = await fancy_evaluate_constraint_or_real_expr(z3_state.ctx, assignments.solver, assignments.truth_table, e)  // Could throw!
+      const result = await fancy_evaluate_constraint_or_real_expr(z3_state.ctx, assignments.model, assignments.truth_table, e)  // Could throw!
       // const result_html = constraint_to_real_expr_result_to_html(result)
       const result_html = fancy_evaluator_result_to_display(result)
       return math_el('math', {},
@@ -894,6 +901,18 @@ const model_evaluators = (z3_state_box: Editable<Z3ContextState>, model_assignme
     }
   }
 
+  // Error: you can't execute multiple async functions at the same time; let the previous one finish first
+  //   at Module.async_call (z3-built.js:115:11)
+  //   at Object.simplify (z3-solver.js?v=6ce20369:2322:24)
+  //   at Object.simplify (z3-solver.js?v=6ce20369:3820:35)
+  //   at expr_to_assignment (z3_integration.ts:474:32)
+  //   at fancy_evaluate_constraint_or_real_expr (z3_integration.ts:155:24)
+  //   at display_constraint_or_real_expr_with_evaluation (text_to_display.ts:894:28)
+  //   at call_display_func (block_playground.ts:133:20)
+  //   at block_playground.ts:150:36
+  //   at Object.call (editable.ts:68:26)
+  //   at Editable.notify (editable.ts:62:9)
+
   // const mi = generic_multi_input(
   //   TestId.generic_multi_input('eval'),
   //   TestId.single_input.eval,
@@ -902,10 +921,12 @@ const model_evaluators = (z3_state_box: Editable<Z3ContextState>, model_assignme
   //   Constants.CONSTRAINT_OR_REAL_EXPR_INPUT_INSTRUCTIONS,
   //   parse_constraint_or_real_expr,
   //   display_constraint_or_real_expr_with_evaluation)
+  const test_ids = TestId.generic_multi_input('eval')
   const eval_block = new InputBlockLogic<ConstraintOrRealExpr, SplitInput>(
     parse_constraint_or_real_expr,
-    (logic) => split_input(logic, display_constraint_or_real_expr_with_evaluation, Constants.EVALUATOR_INPUT_PLACEHOLDER, TestId.single_input.eval))
-  const mi = generic_input_block(eval_block, Constants.BATCH_EVALUATOR_INPUT_PLACEHOLDER)
+    // (logic) => split_input(logic, display_constraint_or_real_expr_with_evaluation, Constants.EVALUATOR_INPUT_PLACEHOLDER, TestId.single_input.eval))
+    (logic) => split_input(logic, display_constraint_or_real_expr_with_evaluation, Constants.EVALUATOR_INPUT_PLACEHOLDER, test_ids.split))
+  const mi = generic_input_block(eval_block, Constants.BATCH_EVALUATOR_INPUT_PLACEHOLDER, test_ids)
 
   const refresh = () => {
     for (const input of eval_block.get_inputs()) {
@@ -920,6 +941,84 @@ const model_evaluators = (z3_state_box: Editable<Z3ContextState>, model_assignme
   return { element, refresh  }
 }
 
+const ms_to_time_string = (total_seconds: number) => {
+  assert(Number.isInteger(total_seconds))
+  let leftover = total_seconds
+  const hours = Math.floor(leftover / 3600)
+  leftover -= hours * 3600
+  const minutes = Math.floor(leftover / 60)
+  leftover -= minutes * 60
+  const seconds = leftover
+
+  let split_str: string[] = []
+  if (hours > 0) {
+    split_str.push(`${hours} h`)
+  }
+  if (minutes > 0) {
+    split_str.push(`${minutes} m`)
+  }
+  if (seconds > 0) {
+    split_str.push(`${seconds} s`)
+  }
+
+  return split_str.join(', ')
+}
+
+const timeout = (timeout_ms: Editable<number>) => {
+  const MIN_HRS = 0
+  const MAX_HRS = 2
+  const MIN_MNS = 0
+  const MAX_MNS = 59
+  const MIN_SCS = 0
+  const MAX_SCS = 59
+
+  const DEF_HRS = MIN_HRS
+  const DEF_MNS = MIN_MNS
+  const DEF_SCS = 1
+
+  const hi = el('input', { style: 'margin-right: 0.5ch; margin-bottom: 0.1ch;', type: 'number', min: MIN_HRS.toString(), max: MAX_HRS.toString(), value: DEF_HRS.toString() }) as HTMLInputElement
+  const mi = el('input', { style: 'margin-right: 0.5ch; margin-bottom: 0.1ch', type: 'number', min: MIN_MNS.toString(), max: MAX_MNS.toString(), value: DEF_MNS.toString() }) as HTMLInputElement
+  const si = el('input', { style: 'margin-right: 0.5ch;', type: 'number', min: MIN_SCS.toString(), max: MAX_SCS.toString(), value: DEF_SCS.toString() }) as HTMLInputElement
+
+  const set_timeout_ms = () => {
+    const h = parseInt(hi.value)
+    const m = parseInt(mi.value)
+    const s = parseInt(si.value)
+    const ms = s * 1000 + m * 60 * 1000 + h * 60 * 60 * 1000
+    timeout_ms.set(ms)
+  }
+
+  // we're overriding the initial setting because why not?
+  set_timeout_ms()
+
+  hi.onchange = () => {
+    const parsed = parseInt(hi.value)
+    const value = Math.min(parsed, MAX_HRS)
+    hi.value = value.toString()
+    set_timeout_ms()
+  }
+
+  mi.onchange = () => {
+    const parsed = parseInt(mi.value)
+    const value = Math.min(parsed, MAX_MNS)
+    mi.value = value.toString()
+    set_timeout_ms()
+  }
+
+  si.onchange = () => {
+    const parsed = parseInt(si.value)
+    const value = Math.min(parsed, MAX_SCS)
+    si.value = value.toString()
+    set_timeout_ms()
+  }
+
+  return el('div', {},
+    el('label', { style: 'display: block;' }, hi, 'hour(s)'),
+    el('label', { style: 'display: block;' }, mi, 'minute(s)'),
+    el('label', { style: 'display: block;' }, si, 'second(s)'),
+  )
+}
+
 const model_finder_display = (constraint_block: InputBlockLogic<Constraint, SplitInput>): ModelFinderDisplay => {
   const state = new Editable<ModelFinderState>({ tag: 'waiting' })
   const model_container = el('div', { class: 'model-container' })
@@ -930,7 +1029,7 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
     model_container,
   )
   const z3_state = new Editable<Z3ContextState>({ tag: 'loading' })
-  const model_assignments = new Editable<{ truth_table: TruthTable, values: Record<number, ModelAssignmentOutput> } | undefined>(undefined)
+  const model_assignments = new Editable<{ truth_table: TruthTable, model: Model, values: Record<number, ModelAssignmentOutput> } | undefined>(undefined)
   const evaluators = model_evaluators(z3_state, model_assignments)
   const right_side = el('div', {},
     // evaluators.element,  // Will be added in the state watcher.
@@ -945,16 +1044,25 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
   const z3_status_container = tel(TestId.z3_status, 'div', { style: 'margin-left: 0.4em;' })
   const is_regular = new Editable(false)
   const regular_toggle = tel(TestId.regular_toggle, 'input', { type: 'checkbox', style: 'margin-left: 0.4em;' }, 'Regular') as HTMLInputElement
+  const timeout_ms = new Editable(1000)
+  const timeout_input = timeout(timeout_ms)
+  timeout_ms.watch((ms) => console.log('timeout set to:', ms))
   const generate_line = el('div', { style: 'display: flex;' },
     generate_button,
     // el('input', { type: 'button', value: Constants.FIND_MODEL_BUTTON_LABEL, class: 'generate' }) as HTMLButtonElement,
     // options_button,
-    el('label', {},
-      regular_toggle,
-      'Regular',
+    el('div', { style: 'display: flex; flex-direction: column; margin-left: 0.4em;' },
+      el('label', {},
+        'Regular:',
+        regular_toggle,
+      ),
+      el('label', { style: 'display: flex;' },
+        el('span', { style: 'margin-right: 1ch;' }, 'Timeout:'),
+        timeout_input,
+      ),
     ),
     z3_status_container)
-
+  
   const set_all_constraints = (all_constraints: Constraint[] | undefined) => {
     console.log('on_ready', all_constraints?.map(constraint_to_string))
     invalidate()
@@ -1023,9 +1131,11 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
     try {
       const tt_display = truth_table_display(truth_table)
       model_container.appendChild(tt_display)
-      const { status, all_constraints, state_values, model } = await pr_sat_with_truth_table(ctx, truth_table, constraints, is_regular)
+      // const { status, all_constraints, state_values, model } = await pr_sat_with_truth_table(ctx, truth_table, constraints, is_regular)
+      const result = await pr_sat_with_options(ctx, truth_table, constraints, { regular: is_regular, timeout_ms: timeout_ms.get() })
+      const { status, all_constraints, model } = result
       if (status === 'sat') {
-        state.set({ tag: 'sat', truth_table, assignments: model, state_values })
+        state.set({ tag: 'sat', model: result.z3_model, truth_table, assignments: model })
       } else if (status === 'unsat') {
         state.set({ tag: 'unsat', truth_table })
       } else if (status === 'unknown') {
@@ -1074,7 +1184,7 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
   state.watch((state) => {
     // Logic
     if (state.tag === 'sat') {
-      model_assignments.set({ truth_table: state.truth_table, values: state.assignments })
+      model_assignments.set({ truth_table: state.truth_table, model: state.model, values: state.assignments })
       // evaluators.multi_input.refresh()
       evaluators.refresh()
     } else if (state.tag === 'invalidated') {
@@ -1095,7 +1205,7 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
       constraints_view.innerHTML = ''
     } else if (state.tag === 'looking') {
       state_display.innerHTML = ''
-      state_display.append('Searching for model satisfying constraints...')
+      state_display.append(Constants.SEARCH)
     } else if (state.tag === 'sat') {
       state_display.innerHTML = ''
       state_display.append(Constants.SAT)
@@ -1198,10 +1308,11 @@ const main = (): HTMLElement => {
   // const is_regular = new Editable(false)
   // const regular_toggle = tel(TestId.regular_toggle, 'input', { type: 'checkbox' }, 'Regular') as HTMLInputElement
   // const mi = generic_multi_input(TestId.generic_multi_input('constraints'), TestId.single_input.constraint, Constants.CONSTRAINT_INPUT_PLACEHOLDER, Constants.BATCH_CONSTRAINT_INPUT_PLACEHOLDER, Constants.CONSTRAINT_INPUT_INSTRUCTIONS, parse_constraint, constraint_to_html)
+  const test_ids = TestId.generic_multi_input('constraints')
   const constraint_block = new InputBlockLogic<Constraint, SplitInput>(
     parse_constraint,
-    (logic) => split_input(logic, async (c) => constraint_to_html(c, true), Constants.CONSTRAINT_INPUT_PLACEHOLDER, TestId.single_input.constraint))
-  const mi = generic_input_block(constraint_block, Constants.BATCH_CONSTRAINT_INPUT_PLACEHOLDER)
+    (logic) => split_input(logic, async (c) => constraint_to_html(c, true), Constants.CONSTRAINT_INPUT_PLACEHOLDER, test_ids.split))
+  const mi = generic_input_block(constraint_block, Constants.BATCH_CONSTRAINT_INPUT_PLACEHOLDER, test_ids)
 
   const model_finder = model_finder_display(constraint_block)
 
@@ -1266,6 +1377,16 @@ const main = (): HTMLElement => {
   // }
 
   return el('div', {},
+    el('div', { class: 'header' },
+      el('h3', {}, 'PrSAT 3.0b: The Probability Table Generator (Beta)'),
+      el('div', {}, 'PrSAT 3.0 is an open source, ASCII/web based probability table generator.'),
+      el('div', {}, 'It runs on any modern browser, and requires no additional software.'),
+      el('div', {}, 'It takes (arbitrary) sets of statements in probability calculus as input (in ASCII format).'),
+      el('div', {}, 'If the set is satisfiable, it will return a probability distribution (in the form of a probability table).'),
+      el('div', {}, 'If not, it will return "unsatisfiable."'),
+      el('br', {}),
+      el('div', {}, 'Here is a brief video demo of the software.'),
+    ),
     mi.element,
     // el('div', { class: 'model-input' },
     //   mi.element,

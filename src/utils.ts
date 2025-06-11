@@ -195,3 +195,7 @@ export const as_array = <T, O>(t: T[] | O, message: string = 'Expected array!'):
         throw new Error(message)
     }
 }
+
+export const readonly = <T extends {}>(t: T): Readonly<T> => {
+    return t
+}

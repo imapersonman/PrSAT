@@ -1,4 +1,4 @@
-import { Editable, EditableDLL, Watcher, WatchGroup } from "./editable"
+import { AsyncEditable, AsyncWatcher, Editable, EditableDLL, Watcher, WatchGroup } from "./editable"
 import { TruthTable } from "./pr_sat"
 import { PrSat } from "./types"
 import { assert_exists, fallthrough, Res } from "./utils"
@@ -22,8 +22,8 @@ type SingleInputState<ParseOutput extends {}> =
   | { tag: 'error', message: string }
 
 export class SingleInputLogic<ParseOutput extends {}, Associate = undefined> {
-  readonly text = new Editable<string>('')
-  private readonly output = new Editable<SingleInputState<ParseOutput>>({ tag: 'nothing' })
+  readonly text = new AsyncEditable<string>('')
+  private readonly output = new AsyncEditable<SingleInputState<ParseOutput>>({ tag: 'nothing' })
   private readonly watch_group = new WatchGroup([])  // To be used externally ONLY!
   public readonly associate: Associate
   public readonly has_siblings: Editable<boolean>
@@ -32,15 +32,15 @@ export class SingleInputLogic<ParseOutput extends {}, Associate = undefined> {
   constructor(
     private readonly parent_block: InputBlockLogic<ParseOutput, Associate>,
   ) {
-    this.text.watch((text) => {
+    this.text.watch(async (text) => {
       if (text === '') {
-        this.output.set({ tag: 'nothing' })
+        await this.output.set({ tag: 'nothing' })
       } else {
         const [status, parsed] = this.parent_block.parser(text)
         if (status) {
-          this.output.set({ tag: 'parsed', output: parsed })
+          await this.output.set({ tag: 'parsed', output: parsed })
         } else {
-          this.output.set({ tag: 'error', message: parsed })
+          await this.output.set({ tag: 'error', message: parsed })
         }
       }
     })
@@ -57,7 +57,7 @@ export class SingleInputLogic<ParseOutput extends {}, Associate = undefined> {
     return next
   }
 
-  on_state_change(f: (state: SingleInputState<ParseOutput>, last_state?: SingleInputState<ParseOutput>) => void): Watcher<unknown> {
+  on_state_change(f: (state: SingleInputState<ParseOutput>, last_state?: SingleInputState<ParseOutput>) => Promise<undefined>): AsyncWatcher<unknown> {
     return this.output.watch(f)
   }
 
@@ -65,7 +65,7 @@ export class SingleInputLogic<ParseOutput extends {}, Associate = undefined> {
     return this.output.get()
   }
 
-  on_focus(f: (is_focused: boolean) => void): Watcher<unknown> {
+  on_focus(f: (is_focused: boolean) => undefined): Watcher<unknown> {
     // this.parent_block
     return this.is_focused.watch(f)
   }
@@ -120,7 +120,7 @@ export class InputBlockLogic<ParseOutput extends {}, Associate = undefined> {
       // parsed -> error:   Constraint[] --> undefined.
       // nothing -> parsed: Constraint[] --> Constraint[] (bigger).
       // error -> parsed:   undefined    --> Constraint[].
-      input.on_state_change((input_state, last_state) => {
+      input.on_state_change(async (input_state, last_state) => {
         if (last_state === undefined) {
           throw new Error('SingleInputLogic updates from undefined!')
         } else if (last_state.tag === 'nothing') {
@@ -247,7 +247,7 @@ export class InputBlockLogic<ParseOutput extends {}, Associate = undefined> {
   // }
 
   // undefined when cleared.
-  on_ready(f: (outputs: ParseOutput[] | undefined) => void): Watcher<unknown> {
+  on_ready(f: (outputs: ParseOutput[] | undefined) => undefined): Watcher<unknown> {
     return this.outputs.watch(f)
   }
 
@@ -306,7 +306,7 @@ export class InputBlockLogic<ParseOutput extends {}, Associate = undefined> {
     return this.inputs.size()
   }
 
-  set_fields(fields: string[]): void {
+  async set_fields(fields: string[]): Promise<void> {
     const trimmed_fields = fields.map((f) => f.trim())
     for (const [index, input] of this.inputs.entries()) {
       if (index >= trimmed_fields.length) {
@@ -315,7 +315,7 @@ export class InputBlockLogic<ParseOutput extends {}, Associate = undefined> {
       } else {
         // we can reuse some!
         const f = assert_exists(trimmed_fields[index], `Field at index ${index} doesn\'t exist so you probably messed up near this assertion!`)
-        input.text.set(f)
+        await input.text.set(f)
       }
     }
 
@@ -324,7 +324,7 @@ export class InputBlockLogic<ParseOutput extends {}, Associate = undefined> {
       let last_input = this.inputs.at(this.inputs.size() - 1)
       for (const f of trimmed_fields.slice(this.inputs.size())) {
         last_input = this.insert_input_after(last_input)
-        last_input.text.set(f)
+        await last_input.text.set(f)
       }
     }
 
@@ -363,7 +363,7 @@ export class BatchInputLogic<ParseOutput extends {}, Associate = undefined> {
   constructor(private readonly parent_block: InputBlockLogic<ParseOutput, Associate>) {
     this.parent_block.on_insert((inserted) => {
       this.desync()
-      inserted.text.watch(() => {
+      inserted.text.watch(async () => {
         this.desync()
       })
     })
@@ -383,7 +383,7 @@ export class BatchInputLogic<ParseOutput extends {}, Associate = undefined> {
     }
   }
 
-  on_sync(f: (synced: boolean) => void): void {
+  on_sync(f: (synced: boolean) => undefined): void {
     this.is_synced.watch(f)
   }
 
@@ -391,9 +391,9 @@ export class BatchInputLogic<ParseOutput extends {}, Associate = undefined> {
     return this.is_synced.get()
   }
 
-  send(): void {
+  async send(): Promise<void> {
     const fields = this.text.get().split('\n')
-    this.parent_block.set_fields(fields)
+    await this.parent_block.set_fields(fields)
     this.is_synced.set(true)
   }
 }
