@@ -1,10 +1,10 @@
-import { Context, Model, Solver } from "z3-solver";
+import { Context, Model } from "z3-solver";
 import { Editable, rEditable } from './editable';
 import { el, math_el, tel } from "./el";
 import { assert, assert_exists, fallthrough } from "./utils";
 import { parse_constraint, parse_constraint_or_real_expr } from "./parser";
 import { constraint_to_string, letter_string, TruthTable, variables_in_constraints } from "./pr_sat";
-import { fancy_evaluate_constraint_or_real_expr, FancyEvaluatorOutput, init_z3, ModelAssignmentOutput, pr_sat_with_options, pr_sat_with_truth_table } from "./z3_integration";
+import { fancy_evaluate_constraint_or_real_expr, FancyEvaluatorOutput, init_z3, ModelAssignmentOutput, pr_sat_with_options } from "./z3_integration";
 import { s_to_string } from "./s";
 import { ConstraintOrRealExpr, PrSat } from "./types";
 import { Equiv } from "./tag_map";
@@ -16,7 +16,6 @@ import * as TestId from '../tests/test_ids'
 import * as Constants from './constants'
 
 import './style.css'
-import { onTestFinished } from "vitest";
 
 const root = assert_exists(document.getElementById('app'), 'Root element with id \'#app\' doesn\'t exist!')
 
@@ -947,28 +946,28 @@ const model_evaluators = (
   return { element, refresh  }
 }
 
-const ms_to_time_string = (total_seconds: number) => {
-  assert(Number.isInteger(total_seconds))
-  let leftover = total_seconds
-  const hours = Math.floor(leftover / 3600)
-  leftover -= hours * 3600
-  const minutes = Math.floor(leftover / 60)
-  leftover -= minutes * 60
-  const seconds = leftover
+// const ms_to_time_string = (total_seconds: number) => {
+//   assert(Number.isInteger(total_seconds))
+//   let leftover = total_seconds
+//   const hours = Math.floor(leftover / 3600)
+//   leftover -= hours * 3600
+//   const minutes = Math.floor(leftover / 60)
+//   leftover -= minutes * 60
+//   const seconds = leftover
 
-  let split_str: string[] = []
-  if (hours > 0) {
-    split_str.push(`${hours} h`)
-  }
-  if (minutes > 0) {
-    split_str.push(`${minutes} m`)
-  }
-  if (seconds > 0) {
-    split_str.push(`${seconds} s`)
-  }
+//   let split_str: string[] = []
+//   if (hours > 0) {
+//     split_str.push(`${hours} h`)
+//   }
+//   if (minutes > 0) {
+//     split_str.push(`${minutes} m`)
+//   }
+//   if (seconds > 0) {
+//     split_str.push(`${seconds} s`)
+//   }
 
-  return split_str.join(', ')
-}
+//   return split_str.join(', ')
+// }
 
 const timeout = (timeout_ms: Editable<number>) => {
   const MIN_HRS = 0

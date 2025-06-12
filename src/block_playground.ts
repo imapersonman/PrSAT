@@ -8,7 +8,6 @@ import { download } from "./download";
 import * as TestId from '../tests/test_ids'
 
 import './style.css'
-import { TestIdGenerator } from "../tests/test_ids";
 
 // const root = assert_exists(document.getElementById('app'))
 

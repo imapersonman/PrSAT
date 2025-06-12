@@ -1022,7 +1022,7 @@ const translate_constraints_to_smtlib = (tt: TruthTable, index_to_eliminate: num
 import P from 'parsimmon'
 import { ConstraintOrRealExpr, PrSat, RealExprMap, SentenceMap } from "./types"
 import { Equiv } from "./tag_map"
-import { S, s_to_string } from "./s"
+import { S } from "./s"
 
 const s_lang = P.createLanguage({
   s: (r) => P.alt(r.list, r.atom),
