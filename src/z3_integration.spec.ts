@@ -14,7 +14,7 @@ describe('parse_to_assignment', () => {
       const ps: S = ['root-obj', poly_s([3, 5]), '1']
       expect(ps).toEqual(s)
       const parsed = parse_to_assignment(s)
-      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', coefficients: [3, 5], index: 1 }
+      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', degree: 1, coefficients: [3, 5], index: 1 }
       expect(parsed).toEqual(expected)
     })
     test('degree 2', () => {
@@ -22,7 +22,7 @@ describe('parse_to_assignment', () => {
       const ps: S = ['root-obj', poly_s([3, 5, 4]), '1']
       expect(ps).toEqual(s)
       const parsed = parse_to_assignment(s)
-      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', coefficients: [3, 5, 4], index: 1 }
+      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', degree: 2, coefficients: [3, 5, 4], index: 1 }
       expect(parsed).toEqual(expected)
     })
     test('degree 3', () => {
@@ -30,7 +30,7 @@ describe('parse_to_assignment', () => {
       const ps: S = ['root-obj', poly_s([3, 5, 4, 1]), '3']
       expect(ps).toEqual(s)
       const parsed = parse_to_assignment(s)
-      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', coefficients: [3, 5, 4, 1], index: 3 }
+      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', degree: 3, coefficients: [3, 5, 4, 1], index: 3 }
       expect(parsed).toEqual(expected)
     })
     test('degree 11', () => {
@@ -40,7 +40,7 @@ describe('parse_to_assignment', () => {
       // const ps: S = ['root-obj', poly([3, 5, 4, 1, 5, 8, 19, 31, 9, 7, 2, 89]), '8']
       // expect(ps).toEqual(s)
       const parsed = parse_to_assignment(s)
-      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', coefficients: [3, 5, 4, 1, 5, 8, 19, 31, 9, 7, 2, 89], index: 8 }
+      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', degree: 11, coefficients: [3, 5, 4, 1, 5, 8, 19, 31, 9, 7, 2, 89], index: 8 }
       expect(parsed).toEqual(expected)
     })
     test('degree 11 leave 1s implicit', () => {
@@ -50,13 +50,19 @@ describe('parse_to_assignment', () => {
       const ps: S = ['root-obj', poly_s([3, 5, 4, 1, 5, 8, 19, 31, 9, 7, 2, 89]), '8']
       expect(ps).toEqual(s)
       const parsed = parse_to_assignment(s)
-      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', coefficients: [3, 5, 4, 1, 5, 8, 19, 31, 9, 7, 2, 89], index: 8 }
+      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', degree: 11, coefficients: [3, 5, 4, 1, 5, 8, 19, 31, 9, 7, 2, 89], index: 8 }
       expect(parsed).toEqual(expected)
+    })
+    test('badly ordered terms', () => {
+      const s: S = ['root-obj', ['+', '1', ['^', 'x', '2']], '1']
+      // const parsed = parse_to_assignment(s)
+      // expect(parsed).toEqual(true)
+      // expect(() => parse_to_assignment(s)).toThrow()
     })
     test('mostly zeroes', () => {
       const s: S = ['root-obj', ['+', ['^', 'x', '2'], '1'], '1']
       const parsed = parse_to_assignment(s)
-      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', coefficients: [1, 0, 1], index: 1 }
+      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', degree: 2, coefficients: [1, 0, 1], index: 1 }
       expect(parsed).toEqual(expected)
     })
     test('degree 11 with some zeroes', () => {
@@ -64,7 +70,7 @@ describe('parse_to_assignment', () => {
       const ps: S = ['root-obj', poly_s([3, 5, 4, 1, 5, 8, 0, 31, 9, 0, 2, 89]), '8']
       expect(ps).toEqual(s)
       const parsed = parse_to_assignment(s)
-      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', coefficients: [3, 5, 4, 1, 5, 8, 0, 31, 9, 0, 2, 89], index: 8 }
+      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', degree: 11, coefficients: [3, 5, 4, 1, 5, 8, 0, 31, 9, 0, 2, 89], index: 8 }
       expect(parsed).toEqual(expected)
     })
     test('with negative coefficients', () => {
@@ -72,25 +78,25 @@ describe('parse_to_assignment', () => {
       const ps: S = ['root-obj', poly_s([-3, 5, -4, -1]), '3']
       expect(ps).toEqual(s)
       const parsed = parse_to_assignment(s)
-      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', coefficients: [-3, 5, -4, -1], index: 3 }
+      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', degree: 3, coefficients: [-3, 5, -4, -1], index: 3 }
       expect(parsed).toEqual(expected)
     })
     test('implicit 1 with no exp (so just \'x\')', () => {
       const s: S = ['root-obj', ['+', ['^', 'x', '2'], 'x', '1'], '1']
       const parsed = parse_to_assignment(s)
-      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', coefficients: [1, 1, 1], index: 1 }
+      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', degree: 2, coefficients: [1, 1, 1], index: 1 }
       expect(parsed).toEqual(expected)
     })
     test('implicit -1 with no exp (so just \'x\')', () => {
       const s: S = ['root-obj', ['+', ['^', 'x', '2'], ['-', 'x'], '1'], '1']
       const parsed = parse_to_assignment(s)
-      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', coefficients: [1, -1, 1], index: 1 }
+      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', degree: 2, coefficients: [1, -1, 1], index: 1 }
       expect(parsed).toEqual(expected)
     })
     test('implicit -1 with exp (like \'-x^2\')', () => {
       const s: S = ['root-obj', ['+', ['-', ['^', 'x', '2']], 'x', '1'], '1']
       const parsed = parse_to_assignment(s)
-      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', coefficients: [-1, 1, 1], index: 1 }
+      const expected: ModelAssignmentOutput = { tag: 'generic-root-obj', degree: 2, coefficients: [-1, 1, 1], index: 1 }
       expect(parsed).toEqual(expected)
     })
   })

@@ -53,7 +53,7 @@ export type ModelAssignmentOutput =
   | { tag: 'negative', inner: ModelAssignmentOutput }
   | { tag: 'rational', numerator: ModelAssignmentOutput, denominator: ModelAssignmentOutput }
   | { tag: 'root-obj', index: number, a: ModelAssignmentOutput, b: ModelAssignmentOutput, c: ModelAssignmentOutput }
-  | { tag: 'generic-root-obj', index: number, coefficients: number[] }
+  | { tag: 'generic-root-obj', index: number, degree: number, coefficients: number[] }
   | { tag: 'unknown', s: S }
 
 export const constraint_or_real_expr_to_smtlib = (tt: TruthTable, c_or_re: ConstraintOrRealExpr): S => {
@@ -411,35 +411,32 @@ export const parse_to_assignment = (s: S): ModelAssignmentOutput => {
 
           const coefficients: number[] = []
           const n_terms = sum_s.length - 1  // -1 to exclude leading '+'.
-          let expected_exp = n_terms
+          let largest_exp = 0
+          let previous_exp: number | undefined = undefined
           for (let term_index = 0; term_index < n_terms; term_index++) {
             const term = assert_exists(sum_s[1 + term_index], `term missing at index ${1 + term_index!}`)
-            // A term could be:
-            // - a number,
-            // - a number times x, or
-            // - a number times x raised to some power.
             const [c, exp] = parse_poly_term(term)
-            if (expected_exp === exp) {
-              coefficients.push(c)
-            } else if (expected_exp > exp) {
-              expected_exp--
-              while (expected_exp > exp) {
-                coefficients.push(0)
-                expected_exp--
-              }
-              coefficients.push(c)
-            } else {
-              // throw new Error('Expected expected_exp to be >= exp!')
-              coefficients.push(c)
-              expected_exp = exp
+            if (previous_exp !== undefined && previous_exp <= exp) {
+              throw new Error('Expected exponents to monotonically decrease in polynomial!')
             }
+
+            assert(previous_exp === undefined || previous_exp > exp)
+            if (previous_exp !== undefined) {
+              for (let exp_gap = previous_exp - 1; exp_gap > exp; exp_gap--) {
+                coefficients.push(0)
+              }
+            }
+            coefficients.push(c)
+
+            largest_exp = Math.max(largest_exp, exp)
+            previous_exp = exp
           }
           
           const index_s = assert_exists(t[2], 'missing index!')
           const index = typeof index_s === 'string' ? assert_result(parse_int(index_s))
             : typeof index_s === 'number' ? index_s
             : -1
-          return { tag: 'generic-root-obj', coefficients, index }
+          return { tag: 'generic-root-obj', degree: largest_exp, coefficients, index }
         } else {
           return { tag: 'unknown', s: s('s') }
         }
