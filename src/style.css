@@ -213,3 +213,11 @@ input::file-selector-button {
   /* width: fit-content; */
   padding: 0.4em;
 }
+
+.global-error {
+  border-radius: 0.4em;
+  margin-bottom: 0.4em;
+  background-color: rgb(240, 240, 240);
+  /* width: fit-content; */
+  padding: 0.4em;
+}

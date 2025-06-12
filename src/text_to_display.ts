@@ -119,7 +119,6 @@ const hasMathMLSupport = () => {
   return has_mathml
 }
 
-
 // const single_input = <ParseOutput extends {}>(
 //   test_id_gen: TestIdGenerator,
 //   placeholder: string,
@@ -1381,6 +1380,34 @@ const main = (): HTMLElement => {
   //   })
   // }
 
+  const global_error_display = el('div', { class: 'global-error' })
+  global_error_display.style.display = 'none'
+  const show_error = (message: string) => {
+    global_error_display.innerHTML = ''
+    global_error_display.appendChild(el('div', { class: 'error' }, 'Unexpected Exception!'))
+    global_error_display.appendChild(el('div', { class: 'error' }, 'Email a bug report to ', el('a', { href: 'mailto:adjorlolo.k@northeastern.edu' }, 'Koissi Adjorlolo'), ' with a description of what you were doing when this error message popped up along with a screenshot of this page.'))
+    global_error_display.appendChild(el('div', { class:' error' }, 'You can still use the app, but things might not work as expected.'))
+    global_error_display.appendChild(el('div', { class:' error' }, message))
+    global_error_display.style.display = 'block'
+  }
+
+  window.onunhandledrejection = (event) => {
+    show_error(event.reason)
+  }
+
+  window.onerror = (event) => {
+    if (typeof event === 'string') {
+      show_error(event)
+    } else {
+      show_error(JSON.stringify(event))
+    }
+  }
+
+  // const throw_button = el('input', { type: 'button', value: 'Throw' })
+  // throw_button.onclick = () => {
+  //   throw new Error('intentionally thrown!')
+  // }
+
   return el('div', {},
     el('div', { class: 'header' },
       el('h3', {}, 'PrSAT 3.0b: The Probability Table Generator (Beta)'),
@@ -1392,6 +1419,8 @@ const main = (): HTMLElement => {
       el('br', {}),
       el('div', {}, 'Here is a brief video demo of the software.'),
     ),
+    // throw_button,
+    global_error_display,
     mi.element,
     // el('div', { class: 'model-input' },
     //   mi.element,
