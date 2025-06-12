@@ -629,6 +629,14 @@ const display_polynomial = (coefficients: number[]): Node => {
   return final_node
 }
 
+const number_to_model_assignment_output = (n: number): ModelAssignmentOutput => {
+  if (n < 0) {
+    return { tag: 'negative', inner: { tag: 'literal', value: -n } }
+  } else {
+    return { tag: 'literal', value: n }
+  }
+}
+
 const model_assignment_display = (ma: ModelAssignmentOutput): Node => {
   const wrap = (ma: ModelAssignmentOutput): Node => {
     if (ma.tag === 'negative') {
@@ -639,6 +647,20 @@ const model_assignment_display = (ma: ModelAssignmentOutput): Node => {
       return sub(ma)
     }
   }
+  const quad_root_to_display = (a: ModelAssignmentOutput, b: ModelAssignmentOutput, c: ModelAssignmentOutput, index: number): Node => {
+    const b_2 = math_el('msup', {}, wrap(b), math_el('mi', {}, '2'))
+    const _4ac = math_el('mrow', {},
+      math_el('mi', {}, '4'),
+      math_el('mo', {}, '*'), wrap(a),
+      math_el('mo', {}, '*'), wrap(c))
+    const det = math_el('mrow', {}, b_2, math_el('mo', {}, '-'), _4ac)
+    const sqrt_det = math_el('msqrt', {}, det)
+    assert(index === 1 || index === 2, `Expected root-obj index to equal 1 or 2!\nactual: ${index}`)
+    const pm = math_el('mo', {}, index === 1 ? '-' : '+')
+    const num = math_el('mrow', {}, math_el('mrow', {}, math_el('mo', {}, '-'), wrap(b)), pm, sqrt_det)
+    const den = math_el('mrow', {}, math_el('mi', {}, '2'), math_el('mo', {}, '*'), wrap(a))
+    return math_el('mfrac', {}, num, den)
+  }
   const sub = (ma: ModelAssignmentOutput): Node => {
     if (ma.tag === 'literal') {
       return math_el('mi', {}, ma.value.toString())
@@ -647,22 +669,18 @@ const model_assignment_display = (ma: ModelAssignmentOutput): Node => {
     } else if (ma.tag === 'rational') {
       return math_el('mfrac', {}, sub(ma.numerator), sub(ma.denominator))
     } else if (ma.tag === 'root-obj') {
-      const b_2 = math_el('msup', {}, wrap(ma.b), math_el('mi', {}, '2'))
-      const _4ac = math_el('mrow', {},
-        math_el('mi', {}, '4'),
-        math_el('mo', {}, '*'), wrap(ma.a),
-        math_el('mo', {}, '*'), wrap(ma.c))
-      const det = math_el('mrow', {}, b_2, math_el('mo', {}, '-'), _4ac)
-      const sqrt_det = math_el('msqrt', {}, det)
-      assert(ma.index === 1 || ma.index === 2, `Expected root-obj index to equal 1 or 2!\nactual: ${ma.index}`)
-      const pm = math_el('mo', {}, ma.index === 1 ? '-' : '+')
-      const num = math_el('mrow', {}, math_el('mrow', {}, math_el('mo', {}, '-'), wrap(ma.b)), pm, sqrt_det)
-      const den = math_el('mrow', {}, math_el('mi', {}, '2'), math_el('mo', {}, '*'), wrap(ma.a))
-      return math_el('mfrac', {}, num, den)
+      return quad_root_to_display(ma.a, ma.b, ma.c, ma.index)
     } else if (ma.tag === 'unknown') {
       return math_el('mtext', {}, s_to_string(ma.s))
       // return math_el('mtext', {}, 'something!')
     } else if (ma.tag === 'generic-root-obj') {
+      if (ma.degree === 2) {
+        return quad_root_to_display(
+          number_to_model_assignment_output(ma.coefficients[0]),
+          number_to_model_assignment_output(ma.coefficients[1]),
+          number_to_model_assignment_output(ma.coefficients[2]),
+          ma.index)
+      }
       // return sub({ tag: 'unknown', s: ['root-obj', poly_s(ma.coefficients), ma.index.toString()] })
       // return math_el('mtext', {}, model_assignment_output_to_string(ma))
       return math_el('mrow', {}, math_el('mtext', {}, `Root #${ma.index} of `), math_el('mpadded', { lspace: '0.2em' }, display_polynomial(ma.coefficients)))
