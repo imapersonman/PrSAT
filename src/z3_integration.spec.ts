@@ -3,6 +3,14 @@ import { ModelAssignmentOutput, parse_to_assignment, poly_s } from './z3_integra
 import { S } from './s'
 
 describe('parse_to_assignment', () => {
+  describe('negative', () => {
+    test('negative rational', () => {
+      const s: S = ['-', ['/', '3', '16']]
+      const parsed = parse_to_assignment(s)
+      const expected: ModelAssignmentOutput = { tag: 'negative', inner: { tag: 'rational', numerator: { tag: 'literal', value: 3 }, denominator: { tag: 'literal', value: 16 } } }
+      expect(parsed).toEqual(expected)
+    })
+  })
   describe('root-obj', () => {
     test('degree 1', () => {
       // Not sure if this will ever be output from a z3 model but its fine.
@@ -96,7 +104,4 @@ describe('parse_to_assignment', () => {
       expect(parsed).toEqual(expected)
     })
   })
-})
-
-describe('Z3Instance', () => {
 })

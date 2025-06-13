@@ -7,6 +7,7 @@ export const INFO_MESSAGE_EMPTY = 'ⓘ How?'
 export const INFO_MESSAGE_ERROR = 'ⓘ Error!'
 export const INFO_MESSAGE_OKAY = 'ⓘ'
 export const FIND_MODEL_BUTTON_LABEL = 'Find Model'
+export const CANCEL_BUTTON_LABEL = 'Cancel'
 export const DEFAULT_MULTI_INPUT_MODE: 'Batch' | 'Multi' = 'Multi'
 export const CONSTRAINT_INPUT_INSTRUCTIONS = `
 To insert a [Constraint], type in one of:
@@ -52,7 +53,12 @@ ${CONSTRAINT_INPUT_INSTRUCTIONS}
 export const SAT = 'Constraints are SATisfiable!'
 export const UNSAT = 'Constraints are UNSATisfiable!'
 export const UNKNOWN = 'Unable to determine if constraints are satisfiable'
+export const CANCELLED = 'Solve was cancelled'
 export const SEARCH = 'Searching for model satisfying constraints...'
+export const CANCELLING = 'Cancelling...'
 
 export const DIV0 = 'Division by zero!'
+export const NO_MODEL = 'No model to evaluate!'
+
+export const CANCEL_OVERRIDE_TIMEOUT_MS = 5 * 1000
 

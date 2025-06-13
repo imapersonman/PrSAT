@@ -3,6 +3,7 @@ import { match_s, S, spv, clause, s_to_string, default_clause } from "./s"
 import { constraints_to_smtlib_lines, eliminate_state_variable_index, enrich_constraints, parse_s, real_expr_to_smtlib, translate, TruthTable, variables_in_constraints, state_index_id, constraint_to_smtlib, translate_constraint, translate_real_expr, free_variables_in_constraint_or_real_expr as free_sentence_variables_in_constraint_or_real_expr, LetterSet, free_real_variables_in_constraint_or_real_expr, VariableLists, div0_conditions_in_constraint_or_real_expr, translate_constraint_or_real_expr, eliminate_state_variable_index_in_constraint_or_real_expr } from "./pr_sat"
 import { ConstraintOrRealExpr, PrSat } from "./types"
 import { as_array, assert, assert_exists, assert_result, fallthrough, Res } from "./utils"
+import { createExpect } from "vitest"
 
 type RealExpr = PrSat['RealExpr']
 type Constraint = PrSat['Constraint']
@@ -377,9 +378,14 @@ export const parse_to_assignment = (s: S): ModelAssignmentOutput => {
       const as_float = assert_result(parse_float(ma))
       return { tag: 'literal', value: as_float }
     }),
-    clause<{ a: 'string' }, ModelAssignmentOutput>({ a: 'string' }, ['-', a], (m) => {
+    clause<{ a: 's' }, ModelAssignmentOutput>({ a: 's' }, ['-', a], (m) => {
       const inner = parse_to_assignment(m('a'))
       return { tag: 'negative', inner }
+    }),
+    clause<{ a: 'string', b: 'string' }, ModelAssignmentOutput>({ a: 'string', b: 'string' }, ['/', a, b], (m) => {
+      const numerator = parse_to_assignment(m('a'))
+      const denominator = parse_to_assignment(m('b'))
+      return { tag: 'rational', numerator, denominator }
     }),
     clause<{ a: 'string', b: 'string' }, ModelAssignmentOutput>({ a: 'string', b: 'string' }, ['/', a, b], (m) => {
       const numerator = parse_to_assignment(m('a'))
@@ -597,7 +603,14 @@ export type SolverOptions = {
 }
 
 export type SolverReturn<CtxKey extends string> =
-  | { status: 'sat', all_constraints: Constraint[], tt: TruthTable, z3_model: Model<CtxKey>, model: Record<number, ModelAssignmentOutput>, solver: Solver<CtxKey> }
+  | {
+    status: 'sat'
+    all_constraints: Constraint[]
+    tt: TruthTable
+    z3_model: Model<CtxKey>
+    model: Record<number, ModelAssignmentOutput>
+    // solver: Solver<CtxKey>
+  }
   | { status: 'unsat' | 'unknown', all_constraints: Constraint[], tt: TruthTable, model: undefined }
 
 const DEFAULT_SOLVER_OPTIONS: SolverOptions = {
@@ -646,7 +659,7 @@ export const pr_sat_with_options = async <CtxKey extends string>(
       ...await model_to_assignments(ctx, model),
       [index_to_eliminate]: elim_var_value.result,
     }
-    return { status: 'sat', all_constraints: translated, tt, z3_model: model, model: assignments, solver }
+    return { status: 'sat', all_constraints: translated, tt, z3_model: model, model: assignments }
   } else {
     return { status: result, all_constraints: translated, tt, model: undefined }
   }
@@ -668,4 +681,129 @@ export const pr_sat = async <CtxKey extends string>(
 ): Promise<SolverReturn<CtxKey>> => {
   const tt = new TruthTable(variables_in_constraints(constraints))
   return pr_sat_with_truth_table(ctx, tt, constraints, regular)
+}
+
+// const ac = new AbortController()
+// const as = ac.signal
+// as.onabort = () => {
+// }
+
+export type WrappedSolverResult =
+  | {
+    status: 'sat'
+    state_assignments: Record<number, ModelAssignmentOutput>
+    evaluate(tt: TruthTable, c_or_re: ConstraintOrRealExpr): Promise<FancyEvaluatorOutput>
+  }
+  | { status: 'unsat' }
+  | { status: 'unknown' }
+  | { status: 'exception', message: string }
+  | { status: 'cancelled' }
+
+type SolverOptions2 = {
+  regular: boolean
+  abort_signal?: AbortSignal
+}
+
+const DEFAULT_SOLVER_OPTIONS2: SolverOptions2 = {
+  regular: false,
+  abort_signal: undefined,
+}
+
+export type PrSATResult = {
+  constraints: {
+    original: Constraint[]
+    translated: Constraint[]
+    extra: Constraint[]
+    eliminated: Constraint[]
+  }
+  solver_output: WrappedSolverResult
+}
+
+export const pr_sat_wrapped = async (
+  solver: WrappedSolver,
+  tt: TruthTable,
+  constraints: Constraint[],
+  options?: Partial<SolverOptions2>,
+): Promise<PrSATResult> => {
+  const { regular, abort_signal } = { ...DEFAULT_SOLVER_OPTIONS2, ...(options ?? {}) }
+
+  const translated = translate(tt, constraints)
+  const index_to_eliminate = tt.n_states() - 1  // Only this works right now!
+  const enriched_constraints = enrich_constraints(tt, index_to_eliminate, regular, translated)
+  const [redef, elim_constraints] = eliminate_state_variable_index(tt.n_states(), index_to_eliminate, enriched_constraints)
+
+  const smtlib_lines = constraints_to_smtlib_lines(tt, index_to_eliminate, elim_constraints)
+  const result = await solver.solve(smtlib_lines, abort_signal)
+  const output_constraints = {
+    original: constraints,
+    translated,
+    extra: enriched_constraints,
+    eliminated: elim_constraints,
+  }
+
+  if (result.status === 'sat') {
+    const elim_var_value = await result.evaluate(tt, { tag: 'real_expr', real_expr: redef })
+    if (elim_var_value.tag !== 'result') {
+      throw new Error('Oh no error when trying to calculate eliminated variable!')
+    }
+
+    return {
+      constraints: output_constraints,
+      solver_output: {
+        ...result,
+        state_assignments: { ...result.state_assignments, [index_to_eliminate]: elim_var_value.result },
+      }
+    }
+  } else {
+    return {
+      constraints: output_constraints,
+      solver_output: result,
+    }
+  }
+}
+
+export class WrappedSolver {
+  constructor(private readonly z3_interface: Z3HighLevel & Z3LowLevel) {}
+
+  async solve(smtlib_lines: S[], abort_signal?: AbortSignal): Promise<WrappedSolverResult> {
+    const used_ctx = this.z3_interface.Context('main')
+    const solver = new used_ctx.Solver('QF_NRA')
+    const smtlib_lines_string = smtlib_lines.map((s) => s_to_string(s, false)).join('\n')
+
+    try {
+      solver.fromString(smtlib_lines_string)
+    } catch (e: any) {
+      console.error('smtlib_lines:\n', smtlib_lines_string)
+      throw e
+    }
+
+    let interrupted = false
+    const on_abort = () => {
+      interrupted = true
+      used_ctx.interrupt()
+    }
+    abort_signal?.addEventListener('abort', on_abort)
+
+    try {
+      const result = await solver.check()
+      if (result === 'sat') {
+        const model = solver.model()
+        const evaluate = async (tt: TruthTable, c_or_re: ConstraintOrRealExpr): Promise<FancyEvaluatorOutput> => {
+          return await fancy_evaluate_constraint_or_real_expr(used_ctx, model, tt, c_or_re)
+        }
+        const state_assignments = await model_to_assignments(used_ctx, model)
+        return { status: 'sat', evaluate, state_assignments }
+      } else {
+        if (interrupted) {
+          return { status: 'cancelled' }
+        } else {
+          return { status: result }
+        }
+      }
+    } catch (e: any) {
+      return { status: 'exception', message: e.message }
+    } finally {
+      abort_signal?.removeEventListener('abort', on_abort)
+    }
+  }
 }

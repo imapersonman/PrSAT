@@ -14,6 +14,7 @@ import './style.css'
 export type InputBlock = {
   element: HTMLElement
   set_fields: (fields: string[]) => void
+  set_disabled: (disabled: boolean) => void
 }
 
 export type SplitInput = {
@@ -171,8 +172,8 @@ export const split_input = <ParseOutput extends {}>(
     trail: () => {
       output_container.classList.remove('updating')
       logic.text.set(textbox.value)
-        .catch(() => {
-          throw new Error('Should not throw!')
+        .catch((e) => {
+          throw new Error(`Should not throw! ${e.message}`)
         })
     },
   }))
@@ -256,6 +257,16 @@ const split_input_block = <ParseOutput extends {}>(
   return {
     element: parent,
     set_fields: (fields) => block_logic.set_fields(fields),
+    set_disabled: (disabled: boolean) => {
+      set_disabled_for_all_children(parent, disabled)
+    },
+  }
+}
+
+const set_disabled_for_all_children = (e: HTMLElement, disabled: boolean) => {
+  const inputs = e.getElementsByTagName('input')
+  for (const e of inputs) {
+    e.disabled = disabled
   }
 }
 
@@ -294,6 +305,9 @@ const batch_input_block = <ParseOutput extends {}>(
     element,
     set_fields: (fields) => {
       batch_logic.text.set(fields.join('\n'))
+    },
+    set_disabled: (disabled) => {
+      set_disabled_for_all_children(element, disabled)
     },
   }
 }
@@ -365,7 +379,7 @@ export const generic_input_block = <ParseOutput extends {}>(
     await batch_logic.send()
   }
 
-  const element = el('div', { class: 'generic-input-block' },
+  const element = tel(test_ids.id, 'div', { class: 'generic-input-block' },
     file_loader,
     el('div', { style: 'width: fit-content;' },
       el('div', { style: 'margin-bottom: 0.4em;' },
@@ -384,6 +398,9 @@ export const generic_input_block = <ParseOutput extends {}>(
     set_fields: (fields) => {
       batch_block.set_fields(fields)
       split_block.set_fields(fields)
+    },
+    set_disabled: (disabled) => {
+      set_disabled_for_all_children(element, disabled)
     },
   }
 }

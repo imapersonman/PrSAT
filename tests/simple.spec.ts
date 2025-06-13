@@ -11,18 +11,25 @@ const to_load = async (page: Page): Promise<void> => {
   await expect(page.getByTestId(TestId.z3_status)).toBeEmpty({ timeout: DEFAULT_TIMEOUT })
 }
 
-const find_model = async (page: Page, with_result: 'sat' | 'unsat' | 'unknown') => {
+const expect_state_display = async (page: Page, text: string, timeout_ms?: number): Promise<void> => {
+  const state_display = page.getByTestId(TestId.state_display_id)
+  await expect(state_display).toContainText(text, { timeout: timeout_ms })
+}
+
+const find_model = async (page: Page, with_result: 'sat' | 'unsat' | 'unknown' | 'cancelled') => {
   const state_display = page.getByTestId(TestId.state_display_id)
   await page.getByTestId(TestId.find_model).click()
   // Right after we click, we want to be searching!
   await state_display.getByText(Constants.SEARCH).isVisible()
 
   if (with_result === 'sat') {
-    await state_display.getByText(Constants.SAT).isVisible()
+    await expect(state_display).toContainText(Constants.SAT)
   } else if (with_result === 'unsat') {
-    await state_display.getByText(Constants.UNSAT).isVisible()
+    await expect(state_display).toContainText(Constants.UNSAT)
   } else if (with_result === 'unknown') {
-    await state_display.getByText(Constants.UNKNOWN).isVisible()
+    await expect(state_display).toContainText(Constants.UNKNOWN)
+  } else if (with_result === 'cancelled') {
+    // expect(state_display).toContainText(Constants.CANCELLED)
   } else {
     fallthrough('find_model', with_result)
   }
@@ -229,4 +236,244 @@ test('detect division by zero', async ({ page }) => {
   const eval_test_ids = TestId.generic_multi_input('eval')
   await set_block_input(page, eval_test_ids, ['Pr(A) / 0'])
   await expect(page.getByTestId(eval_test_ids.split.single.get(0))).toContainText(Constants.DIV0)
+})
+
+const cancel_solve = async (page: Page, timeout_ms?: number): Promise<void> => {
+  const cancel_button = page.getByTestId(TestId.cancel_id)
+  await cancel_button.click()
+
+  const state_display = page.getByTestId(TestId.state_display_id)
+  await expect(state_display).toContainText(Constants.CANCELLED, { timeout: timeout_ms })
+}
+
+  // This problem was picked because it should take a while to solve.
+const LONGISH_SOLVE: string[] = [
+  'Pr(B | A) > Pr(B)',
+  'Pr(C | A) > Pr(C)',
+  'Pr(C | A) - Pr(C) = Pr(C | A & B) - Pr(C | B)',
+  'Pr(B \\/ C | A) <= Pr(B \\/ C)',
+]
+const MEDIUM_SOLVE: string[] = [
+  'Pr(A & B) = Pr(A) * Pr(B)',
+  'Pr(A & C) = Pr(A) * Pr(C)',
+  'Pr(B & C) = Pr(B) * Pr(C)',
+  'Pr(A & B & C) ≠ Pr(A) * Pr(B) * Pr(C)',
+]
+const SUPER_LONG_SOLVE: string[] = [
+  'Pr(X & Y) = Pr(X) * Pr(Y)',
+  'Pr(X & Z) = Pr(X) * Pr(Z)',
+  'Pr(Y & Z) = Pr(Y) * Pr(Z)',
+  'Pr(X & U) = Pr(X) * Pr(U)',
+  'Pr(Y & U) = Pr(Y) * Pr(U)',
+  'Pr(Z & U) = Pr(Z) * Pr(U)',
+  'Pr(X & Y & Z) = Pr(X) * Pr(Y) * Pr(Z)',
+  'Pr(X & Y & U) = Pr(X) * Pr(Y) * Pr(U)',
+  'Pr(X & Z & U) = Pr(X) * Pr(Z) * Pr(U)',
+  'Pr(Y & Z & U) = Pr(Y) * Pr(Z) * Pr(U)',
+  'Pr(X & Y & Z & U) ≠ Pr(X) * Pr(Y) * Pr(Z) * Pr(U)',
+]
+const SHORT_WAIT_MS = 50
+
+test('cancelling shows cancel message', async ({ page }) => {
+  await to_load(page)
+
+  const constraint_test_ids = TestId.generic_multi_input('constraints')
+  await set_block_input(page, constraint_test_ids, LONGISH_SOLVE)
+
+  find_model(page, 'cancelled').catch((e) => { throw e })
+  await page.waitForTimeout(SHORT_WAIT_MS)
+  await cancel_solve(page)
+})
+
+type SplitInputLocators = {
+  element: Locator
+  input: Locator
+  close: Locator
+  newline: Locator
+  output: Locator
+}
+
+type MultiInputBlockLocators = {
+  element: Locator
+  batch: {
+    element: Locator,
+    textbox: Locator
+    parse_button: Locator
+  }
+  splits: SplitInputLocators[]
+}
+
+const get_multi_input_block = (page: Page, test_ids: TestId.GenericMultiInputTestIds, split_input_start_index: number, n_split_inputs: number): MultiInputBlockLocators => {
+  const block = page.getByTestId(test_ids.id)
+  const batch = block.getByTestId(test_ids.batch.id)
+  const batch_textbox = block.getByTestId(test_ids.batch.textbox)
+  const batch_parse_button = block.getByTestId(test_ids.batch.textbox)
+  const split_inputs: SplitInputLocators[] = []
+
+  // Won't always work starting from zero, so check difference in actual test-id index and expected input_index if the element appears missing.
+  const start_index = split_input_start_index
+  const end_index = start_index + n_split_inputs
+  for (let input_index = start_index; input_index < end_index; input_index++) {
+    const si = block.getByTestId(test_ids.split.single.get(input_index))
+    split_inputs.push({
+      element: si,
+      input: si.getByTestId(test_ids.split.input),
+      close: si.getByTestId(test_ids.split.close),
+      newline: si.getByTestId(test_ids.split.newline),
+      output: si.getByTestId(test_ids.split.output),
+    })
+  }
+
+  return {
+    element: block,
+    batch: {
+      element: batch,
+      textbox: batch_textbox,
+      parse_button: batch_parse_button,
+    },
+    splits: split_inputs,
+  }
+}
+
+const expect_disabled = async (loc: Locator, disabled: boolean): Promise<void> => {
+  if (disabled) {
+    await expect(loc).toBeDisabled()
+  } else {
+    await expect(loc).not.toBeDisabled()
+  }
+}
+
+const expect_multi_input_block_disabled = async (block: MultiInputBlockLocators, disabled: boolean): Promise<void> => {
+  if (await block.batch.element.isVisible()) {
+    await expect_disabled(block.batch.textbox, disabled)
+    await expect_disabled(block.batch.parse_button, disabled)
+  }
+
+  for (const si of block.splits) {
+    await expect_disabled(si.close, disabled)
+    await expect_disabled(si.input, disabled)
+    await expect_disabled(si.newline, disabled)
+  }
+}
+
+test('disable all input elements during solve', async ({ page }) => {
+  await to_load(page)
+
+  const constraint_test_ids = TestId.generic_multi_input('constraints')
+  const constraint_input_array = LONGISH_SOLVE
+  await set_block_input(page, constraint_test_ids, constraint_input_array)
+
+  find_model(page, 'cancelled').catch((e) => { throw e })
+  await page.waitForTimeout(SHORT_WAIT_MS)
+
+  const constraint_block = get_multi_input_block(page, constraint_test_ids, 0, constraint_input_array.length)
+  await expect_multi_input_block_disabled(constraint_block, true)
+})
+
+test('re-enable all input elements on cancel', async ({ page }) => {
+  await to_load(page)
+
+  const constraint_test_ids = TestId.generic_multi_input('constraints')
+  const constraint_input_array = LONGISH_SOLVE
+  await set_block_input(page, constraint_test_ids, constraint_input_array)
+
+  find_model(page, 'cancelled').catch((e) => { throw e })
+  await page.waitForTimeout(SHORT_WAIT_MS)
+  await cancel_solve(page)
+
+  const constraint_block = get_multi_input_block(page, constraint_test_ids, 0, constraint_input_array.length)
+  await expect_multi_input_block_disabled(constraint_block, false)
+})
+
+test('re-enable all input elements on solve', async ({ page }) => {
+  await to_load(page)
+
+  const constraint_test_ids = TestId.generic_multi_input('constraints')
+  const constraint_input_array = ['Pr(A & B) = Pr(A) * Pr(B)']
+  await set_block_input(page, constraint_test_ids, constraint_input_array)
+  await find_model(page, 'sat')
+
+  const constraint_block = get_multi_input_block(page, constraint_test_ids, 0, constraint_input_array.length)
+  await expect_multi_input_block_disabled(constraint_block, false)
+})
+
+test.skip('cancel takes at most a few seconds on long solves', { tag: '@slow' }, async ({ page }) => {
+  test.setTimeout(2 * 1000 * 60)  // 2 minutes to account for the long waits.
+  await to_load(page)
+
+  const constraint_test_ids = TestId.generic_multi_input('constraints')
+  const constraint_input_array = SUPER_LONG_SOLVE
+  await set_block_input(page, constraint_test_ids, constraint_input_array)
+
+  find_model(page, 'cancelled').catch((e) => { throw e })
+  await page.waitForTimeout(1.5 * 1000 * 60)  // I'm not going to want to run this test every time, but this should ensure the cancel takes forever.
+
+  await cancel_solve(page, Constants.CANCEL_OVERRIDE_TIMEOUT_MS + 2000)  // booooooo
+})
+
+test('eval during 2nd solve says no model', async ({ page }) => {
+  await to_load(page)
+
+  const constraint_test_ids = TestId.generic_multi_input('constraints')
+  const constraint_input_array1 = ['Pr(A & B) = Pr(A) * Pr(B)']
+  await set_block_input(page, constraint_test_ids, constraint_input_array1)
+  await find_model(page, 'sat')
+
+  const constraint_input_array2 = LONGISH_SOLVE
+  await set_block_input(page, constraint_test_ids, constraint_input_array2)
+  const second_solve = find_model(page, 'cancelled').catch((e) => { throw e })
+  await page.waitForTimeout(SHORT_WAIT_MS)
+
+  const eval_test_ids = TestId.generic_multi_input('eval')
+  const eval_input_array = ['Pr(A)', 'Pr(B)']
+  await set_block_input(page, eval_test_ids, eval_input_array)
+
+  const eval_block = get_multi_input_block(page, eval_test_ids, 0, eval_input_array.length)
+  await expect(eval_block.splits[0].output).toContainText(Constants.NO_MODEL)
+
+  await cancel_solve(page)
+  await second_solve
+})
+
+test('eval after 1st solve after invalidation does NOT say no model', async ({ page }) => {
+  await to_load(page)
+
+  const constraint_test_ids = TestId.generic_multi_input('constraints')
+  const constraint_input_array1 = ['Pr(A & B) = Pr(A) * Pr(B)']
+  await set_block_input(page, constraint_test_ids, constraint_input_array1)
+  await find_model(page, 'sat')
+
+  const constraint_input_array2 = LONGISH_SOLVE
+  await set_block_input(page, constraint_test_ids, constraint_input_array2)
+
+  const eval_test_ids = TestId.generic_multi_input('eval')
+  const eval_input_array = ['Pr(A)', 'Pr(B)']
+  await set_block_input(page, eval_test_ids, eval_input_array)
+
+  const eval_block = get_multi_input_block(page, eval_test_ids, 0, eval_input_array.length)
+  await expect(eval_block.splits[0].output).not.toContainText(Constants.NO_MODEL)
+})
+
+test('eval during 2nd solve says no model then updates correctly with model', async ({ page }) => {
+  await to_load(page)
+
+  const constraint_test_ids = TestId.generic_multi_input('constraints')
+  const constraint_input_array = ['Pr(A & B) = Pr(A) * Pr(B)']
+  await set_block_input(page, constraint_test_ids, constraint_input_array)
+  await find_model(page, 'sat')
+
+  const constraint_input_array2 = LONGISH_SOLVE
+  await set_block_input(page, constraint_test_ids, constraint_input_array2)
+  // const second_solve = find_model(page, 'cancelled')
+  await find_model(page, 'sat')
+  await page.waitForTimeout(SHORT_WAIT_MS)
+
+  const eval_test_ids = TestId.generic_multi_input('eval')
+  const eval_input_array = ['Pr(-A & -B)']
+  await set_block_input(page, eval_test_ids, eval_input_array)
+
+  const eval_block = get_multi_input_block(page, eval_test_ids, 0, 1)
+  await expect(eval_block.splits[0].output).toContainText(Constants.NO_MODEL)
+  // await second_solve
+  await expect(eval_block.splits[0].output).not.toContainText(Constants.NO_MODEL)
 })

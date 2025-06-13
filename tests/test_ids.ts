@@ -84,3 +84,5 @@ export const batch_input = readonly({
   parse_button: 'batch-input-parse',
   toggle_button: 'batch-input-toggle',
 })
+
+export const cancel_id = 'cancel'

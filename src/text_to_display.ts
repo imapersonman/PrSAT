@@ -1,10 +1,10 @@
-import { Context, Model } from "z3-solver";
-import { Editable, rEditable } from './editable';
+import { Context, Model, Z3HighLevel, Z3LowLevel } from "z3-solver";
+import { AsyncEditable, Editable, rEditable } from './editable';
 import { el, math_el, tel } from "./el";
 import { assert, assert_exists, fallthrough } from "./utils";
 import { parse_constraint, parse_constraint_or_real_expr } from "./parser";
 import { constraint_to_string, letter_string, TruthTable, variables_in_constraints } from "./pr_sat";
-import { fancy_evaluate_constraint_or_real_expr, FancyEvaluatorOutput, init_z3, ModelAssignmentOutput, pr_sat_with_options } from "./z3_integration";
+import { fancy_evaluate_constraint_or_real_expr, FancyEvaluatorOutput, init_z3, ModelAssignmentOutput, pr_sat_with_options, pr_sat_wrapped, PrSATResult, WrappedSolver, WrappedSolverResult } from "./z3_integration";
 import { s_to_string } from "./s";
 import { ConstraintOrRealExpr, PrSat } from "./types";
 import { Equiv } from "./tag_map";
@@ -792,10 +792,19 @@ type ModelFinderState =
   | { tag: 'unknown' }
   | { tag: 'invalidated', last: { truth_table: TruthTable } }
 
+type ModelFinderState2 =
+  | { tag: 'waiting' }
+  | { tag: 'looking', truth_table: TruthTable, abort_controller: AbortController }
+  | { tag: 'finished', truth_table: TruthTable, solver_output: PrSATResult }
+  // | { tag: 'invalidated', last: { truth_table: TruthTable } }
+  | { tag: 'invalidated', last: ModelFinderState2 }
+  | { tag: 'exception', message: string }
+
 type ModelFinderDisplay = {
   element: HTMLElement
-  state: rEditable<ModelFinderState>
-  start_search: (ctx: Context, constraints: Constraint[], is_regular: boolean) => Promise<void>
+  state: rEditable<ModelFinderState2>
+  // start_search: (ctx: Context, constraints: Constraint[], is_regular: boolean) => Promise<void>
+  start_search_solver: (solver: WrappedSolver, constraints: Constraint[], is_regular: boolean) => Promise<void>
   invalidate: () => void
 }
 
@@ -891,8 +900,9 @@ const fancy_evaluator_result_to_display = (output: FancyEvaluatorOutput): Node =
 }
 
 const model_evaluators = (
-  z3_state_box: Editable<Z3ContextState>,
-  model_assignments: rEditable<{ truth_table: TruthTable, model: Model, values: Record<number, ModelAssignmentOutput> } | undefined>,
+  // z3_state_box: Editable<Z3ContextState>,
+  state_box: Editable<ModelFinderState2>,
+  model_assignments: rEditable<{ truth_table: TruthTable, values: Record<number, ModelAssignmentOutput> } | undefined>,
 ): ModelEvaluator => {
   const display_constraint_or_real_expr_with_evaluation = async (e: ConstraintOrRealExpr): Promise<Element> => {
     const d = display_constraint_or_real_expr(e, false)
@@ -900,14 +910,29 @@ const model_evaluators = (
     if (assignments === undefined) {
       return d
     } else {
-      // Weird that we're evaluating in a display function but I don't care.
-      // const result = evaluate_constraint_or_real_expr(assignments.truth_table, assignments.values, e)
-      const z3_state = z3_state_box.get()
-      if (z3_state.tag !== 'ready') {
-        throw new Error('Trying to evaluate model that isn\'t ready!')
+      const state = state_box.get()
+      const [tt, solve_result]: [TruthTable | undefined, WrappedSolverResult] =
+        state.tag === 'finished' ? [state.truth_table, state.solver_output.solver_output]
+        : state.tag === 'invalidated' && state.last.tag === 'finished' ? [state.last.truth_table, state.last.solver_output.solver_output]
+        : [undefined, { status: 'unknown' }]
+      if (solve_result.status !== 'sat' || tt === undefined) {
+        const result_html = math_el('mtext', { class: 'error' }, Constants.NO_MODEL)
+        return math_el('math', {},
+          d,
+          math_el('mo', { class: 'yields' }, '⟾'),
+          result_html)
       }
-      // const result = await fancy_evaluate_constraint_or_real_expr(z3_state.ctx, assignments.solver, assignments.truth_table, e)  // Could throw!
-      const result = await fancy_evaluate_constraint_or_real_expr(z3_state.ctx, assignments.model, assignments.truth_table, e)  // Could throw!
+
+      const result = await solve_result.evaluate(tt, e)
+
+      // // Weird that we're evaluating in a display function but I don't care.
+      // // const result = evaluate_constraint_or_real_expr(assignments.truth_table, assignments.values, e)
+      // const z3_state = z3_state_box.get()
+      // if (z3_state.tag !== 'ready') {
+      //   throw new Error('Trying to evaluate model that isn\'t ready!')
+      // }
+      // // const result = await fancy_evaluate_constraint_or_real_expr(z3_state.ctx, assignments.solver, assignments.truth_table, e)  // Could throw!
+      // const result = await fancy_evaluate_constraint_or_real_expr(z3_state.ctx, assignments.model, assignments.truth_table, e)  // Could throw!
       // const result_html = constraint_to_real_expr_result_to_html(result)
       const result_html = fancy_evaluator_result_to_display(result)
       return math_el('math', {},
@@ -945,28 +970,28 @@ const model_evaluators = (
   return { element, refresh  }
 }
 
-// const ms_to_time_string = (total_seconds: number) => {
-//   assert(Number.isInteger(total_seconds))
-//   let leftover = total_seconds
-//   const hours = Math.floor(leftover / 3600)
-//   leftover -= hours * 3600
-//   const minutes = Math.floor(leftover / 60)
-//   leftover -= minutes * 60
-//   const seconds = leftover
+const seconds_to_time_string = (total_seconds: number) => {
+  assert(Number.isInteger(total_seconds))
+  let leftover = total_seconds
+  const hours = Math.floor(leftover / 3600)
+  leftover -= hours * 3600
+  const minutes = Math.floor(leftover / 60)
+  leftover -= minutes * 60
+  const seconds = leftover
 
-//   let split_str: string[] = []
-//   if (hours > 0) {
-//     split_str.push(`${hours} h`)
-//   }
-//   if (minutes > 0) {
-//     split_str.push(`${minutes} m`)
-//   }
-//   if (seconds > 0) {
-//     split_str.push(`${seconds} s`)
-//   }
+  let split_str: string[] = []
+  if (hours > 0) {
+    split_str.push(`${hours}h`)
+  }
+  if (minutes > 0) {
+    split_str.push(`${minutes}m`)
+  }
+  if (seconds > 0) {
+    split_str.push(`${seconds}s`)
+  }
 
-//   return split_str.join(', ')
-// }
+  return split_str.join(', ')
+}
 
 const timeout = (timeout_ms: Editable<number>) => {
   const MIN_HRS = 0
@@ -1023,8 +1048,59 @@ const timeout = (timeout_ms: Editable<number>) => {
   )
 }
 
+const timeout_countdown = (timeout_seconds: Editable<number>, at_zero: () => void): { cancel: () => void } => {
+  assert(timeout_seconds.get() >= 0, 'Start of timeout countdown is < 0 for some reason!')
+  console.log('starting countdown')
+  if (timeout_seconds.get() <= 0) {
+    at_zero()
+  }
+
+  const cancel = () => {
+    console.log('cancelling countdown!')
+    clearInterval(interval)
+  }
+
+  const interval = setInterval(() => {
+    // console.log('THIS INTERVAL IS HITTING', timeout_seconds.get())
+    if (timeout_seconds.get() <= 0) {
+      at_zero()
+      cancel()
+    } else {
+      timeout_seconds.set(timeout_seconds.get() - 1)
+    }
+  }, 1000)
+
+  return { cancel }
+}
+
+const timeout_element = (timeout_seconds: Editable<number>): { element: HTMLElement, start: (timeout: number, at_zero: () => void) => void, cancel: () => void } => {
+  const e = el('span', {}, seconds_to_time_string(timeout_seconds.get()))
+  const watcher = timeout_seconds.watch((seconds_left) => {
+    e.innerHTML = ''
+    e.append(seconds_to_time_string(seconds_left))
+  })
+
+  let countdown: { cancel: () => void } | undefined = undefined
+
+  return {
+    element: e,
+    start: (timeout: number, at_zero: () => void) => {
+      timeout_seconds.set(timeout)
+      countdown = timeout_countdown(timeout_seconds, () => {
+        watcher.unwatch()
+        at_zero()
+        console.log('OUTER ZERO STUFF!')
+      })
+    },
+    cancel: () => {
+      countdown?.cancel()
+    },
+  }
+}
+
 const model_finder_display = (constraint_block: InputBlockLogic<Constraint, SplitInput>): ModelFinderDisplay => {
-  const state = new Editable<ModelFinderState>({ tag: 'waiting' })
+  // const state = new Editable<ModelFinderState>({ tag: 'waiting' })
+  const state2 = new Editable<ModelFinderState2>({ tag: 'waiting' })
   const model_container = el('div', { class: 'model-container' })
   const state_display = tel(TestId.state_display_id, 'div', {})
   const status_container = el('div', {}, state_display)
@@ -1032,9 +1108,12 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
     status_container,
     model_container,
   )
-  const z3_state = new Editable<Z3ContextState>({ tag: 'loading' })
-  const model_assignments = new Editable<{ truth_table: TruthTable, model: Model, values: Record<number, ModelAssignmentOutput> } | undefined>(undefined)
-  const evaluators = model_evaluators(z3_state, model_assignments)
+  // const z3_state = new Editable<Z3ContextState>({ tag: 'loading' })
+  const z3_state2 = new Editable<Z3SolverState>({ tag: 'loading' })
+  // const model_assignments = new Editable<{ truth_table: TruthTable, model: Model, values: Record<number, ModelAssignmentOutput> } | undefined>(undefined)
+  const model_assignments2 = new Editable<{ truth_table: TruthTable, values: Record<number, ModelAssignmentOutput> } | undefined>(undefined)
+  // const evaluators = model_evaluators(z3_state, model_assignments)
+  const evaluators = model_evaluators(state2, model_assignments2)
   const right_side = el('div', {},
     // evaluators.element,  // Will be added in the state watcher.
   )
@@ -1045,7 +1124,8 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
   const constraints_view = el('div', {})
 
   const generate_button = tel(TestId.find_model, 'input', { type: 'button', value: Constants.FIND_MODEL_BUTTON_LABEL, class: 'generate' }) as HTMLButtonElement
-  const z3_status_container = tel(TestId.z3_status, 'div', { style: 'margin-left: 0.4em;' })
+  const cancel_button = tel(TestId.cancel_id, 'input', { type: 'button', value: Constants.CANCEL_BUTTON_LABEL, style: 'margin-top: 0.4em;' }) as HTMLButtonElement
+  const z3_status_container = tel(TestId.z3_status, 'div', { style: 'margin-bottom: 0.4em;' })
   const is_regular = new Editable(false)
   const regular_toggle = tel(TestId.regular_toggle, 'input', { type: 'checkbox', style: 'margin-left: 0.4em;' }, 'Regular') as HTMLInputElement
   const timeout_ms = new Editable(1000)
@@ -1065,10 +1145,10 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
         timeout_input,
       ),
     ),
-    z3_status_container)
+  )
   
   const set_all_constraints = (all_constraints: Constraint[] | undefined) => {
-    console.log('on_ready', all_constraints?.map(constraint_to_string))
+    // console.log('on_ready', all_constraints?.map(constraint_to_string))
     invalidate()
     if (all_constraints === undefined) {
       generate_button.disabled = true
@@ -1088,26 +1168,31 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
     is_regular.set(regular_toggle.checked)
   })
 
-  const load_z3 = async (): Promise<Context> => {
-    const { Context } = await init_z3()
-    return Context('main')
-  }
+  // const load_z3 = async (): Promise<Context> => {
+  //   const { Context } = await init_z3()
+  //   return Context('main')
+  // }
 
-  load_z3()
-    .then((ctx) => {
-      z3_state.set({ tag: 'ready', ctx })
+  // load_z3()
+  init_z3()
+    .then((z3_interface) => {
+      // z3_state.set({ tag: 'ready', ctx })
+      z3_state2.set({ tag: 'ready', solver: new WrappedSolver(z3_interface) })
     })
     .catch((error) => {
-      z3_state.set({ tag: 'error', message: error.message })
+      // z3_state.set({ tag: 'error', message: error.message })
+      z3_state2.set({ tag: 'error', message: error.message })
     })
   
-  z3_state.watch((state) => {
+  // z3_state.watch((state) => {
+  z3_state2.watch((state) => {
     z3_status_container.innerHTML = ''
     if (state.tag === 'loading') {
       z3_status_container.append('Loading Z3...')
       generate_button.disabled = true
     } else if (state.tag === 'ready') {
-      z3_is_ready(state.ctx)
+      // z3_is_ready(state.ctx)
+      z3_is_ready_2(state.solver)
       set_all_constraints(constraint_block.get_output())
     } else if (state.tag === 'error') {
       z3_status_container.append(state.message)
@@ -1117,46 +1202,136 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
       }
       generate_button.disabled = true
     } else {
-      throw new Error('')
+      fallthrough('model_finder_display.z3_state2.watch', state)
     }
   }).call()
 
-  const z3_is_ready = (ctx: Context) => {
-    generate_button.addEventListener('click', async () => {
-      const constraints = assert_exists(constraint_block.get_output(), 'Generate button clicked but not all constraints ready!')
-      await start_search(ctx, constraints, is_regular.get())
-    })
+  // const z3_is_ready = (ctx: Context) => {
+  //   generate_button.addEventListener('click', async () => {
+  //     const constraints = assert_exists(constraint_block.get_output(), 'Generate button clicked but not all constraints ready!')
+  //     await start_search(ctx, constraints, is_regular.get())
+  //   })
+  // }
+
+  const cancel = (abort_controller: AbortController) => {
+    console.log('cancelling!')
+    state_display.innerHTML = ''
+    state_display.append(Constants.CANCELLING)
+    abort_controller.abort()
+    // This is a hack to just abandon an old solve/ctx if it takes too long to cancel, which is likely if a solve has been running for a while.
+    setTimeout(() => {
+      // This currently has a bug where if you cancel then start again within the timeout, the new solve will be cancelled, which is lame.
+      // Damn this could lead to a bug: what if the cancel succeeds at some point in the future?
+      //                                What if this happens during another solve?
+      //                                Then that other solve will appear to have been interrupted, which is BAD.
+      //                                The only solution I can think of is ignoring cancelled states, but that's dumb.
+      const state = state2.get()
+      if (state.tag === 'looking') {
+        // If it's still looking, just cancel it for realsies.
+        state2.set({
+          tag: 'finished',
+          truth_table: state.truth_table,
+          solver_output: {
+            constraints: {
+              original: [],
+              translated: [],
+              extra: [],
+              eliminated: [],
+            },
+            // We really just want the cancelled part set correctly.
+            solver_output: { status: 'cancelled' }
+          }
+        })
+      }
+    }, Constants.CANCEL_OVERRIDE_TIMEOUT_MS)
   }
 
-  const start_search = async (ctx: Context, constraints: Constraint[], is_regular: boolean): Promise<void> => {
+  const z3_is_ready_2 = (solver: WrappedSolver) => {
+    generate_button.addEventListener('click', async () => {
+      assert(state2.get().tag !== 'looking', 'Trying to generate another model while looking for stuff!')
+      const constraints = assert_exists(constraint_block.get_output(), 'Generate button clicked but not all constraints ready!')
+      await start_search_solver(solver, constraints, is_regular.get())
+    })
+    cancel_button.onclick = () => {
+      const state = state2.get()
+      if (state.tag !== 'looking') {
+        throw new Error(`Trying to cancel while not looking for a model!\nstate: ${JSON.stringify(state)}`)
+      }
+      cancel(state.abort_controller)
+    }
+  }
+
+  // const start_search = async (ctx: Context, constraints: Constraint[], is_regular: boolean): Promise<void> => {
+  //   const truth_table = new TruthTable(variables_in_constraints(constraints))
+  //   state.set({ tag: 'looking', truth_table })
+  //   model_container.innerHTML = ''
+  //   try {
+  //     const tt_display = truth_table_display(truth_table)
+  //     model_container.appendChild(tt_display)
+  //     // const { status, all_constraints, state_values, model } = await pr_sat_with_truth_table(ctx, truth_table, constraints, is_regular)
+  //     const result = await pr_sat_with_options(ctx, truth_table, constraints, { regular: is_regular, timeout_ms: timeout_ms.get() })
+  //     const { status, all_constraints, model } = result
+  //     if (status === 'sat') {
+  //       state.set({ tag: 'sat', model: result.z3_model, truth_table, assignments: model })
+  //     } else if (status === 'unsat') {
+  //       state.set({ tag: 'unsat', truth_table })
+  //     } else if (status === 'unknown') {
+  //       state.set({ tag: 'unknown' })
+  //     } else {
+  //       const check: Equiv<typeof status, never> = true
+  //       void check
+  //     }
+
+  //     constraints_view.innerHTML = ''
+  //     for (const constraint of all_constraints) {
+  //       const e = constraint_to_html(constraint, true)
+  //       constraints_view.appendChild(el('div', { style: 'margin-top: 0.4em;' }, e))
+  //     }
+  //   }
+  //   catch (e: any) {
+  //     state.set({ tag: 'unknown' })
+  //     status_container.appendChild(el('div', { style: 'color: red;' },
+  //       tel(TestId.exception_id, 'div', {}, 'Exception!'),
+  //       e.message))
+  //     console.error(e.stack)
+  //   }
+  // }
+
+  const start_search_solver = async (solver: WrappedSolver, constraints: Constraint[], is_regular: boolean): Promise<void> => {
     const truth_table = new TruthTable(variables_in_constraints(constraints))
-    state.set({ tag: 'looking', truth_table })
+    // state.set({ tag: 'looking', truth_table })
+    const abort_controller = new AbortController()
+    state2.set({ tag: 'looking', truth_table, abort_controller })
     model_container.innerHTML = ''
     try {
       const tt_display = truth_table_display(truth_table)
       model_container.appendChild(tt_display)
       // const { status, all_constraints, state_values, model } = await pr_sat_with_truth_table(ctx, truth_table, constraints, is_regular)
-      const result = await pr_sat_with_options(ctx, truth_table, constraints, { regular: is_regular, timeout_ms: timeout_ms.get() })
-      const { status, all_constraints, model } = result
-      if (status === 'sat') {
-        state.set({ tag: 'sat', model: result.z3_model, truth_table, assignments: model })
-      } else if (status === 'unsat') {
-        state.set({ tag: 'unsat', truth_table })
-      } else if (status === 'unknown') {
-        state.set({ tag: 'unknown' })
-      } else {
-        const check: Equiv<typeof status, never> = true
-        void check
-      }
+      // const result = await pr_sat_with_options(ctx, truth_table, constraints, { regular: is_regular, timeout_ms: timeout_ms.get() })
+      const result = await pr_sat_wrapped(solver, truth_table, constraints, { regular: is_regular, abort_signal: abort_controller.signal })
+      state2.set({ tag: 'finished', truth_table, solver_output: result })
+      // const { status, all_constraints, model } = result
+      // if (result.solver_output.status === 'sat') {
+      //   state.set({ tag: 'sat', model: result.z3_model, truth_table, assignments: model })
+      // } else if (status === 'unsat') {
+      //   state.set({ tag: 'unsat', truth_table })
+      // } else if (status === 'unknown') {
+      //   state.set({ tag: 'unknown' })
+      // } else if (status === 'cancelled') {
+      // } else if (status === 'exception') {
+      // } else {
+      //   fallthrough('start_search_solver', status)
+      // }
 
       constraints_view.innerHTML = ''
-      for (const constraint of all_constraints) {
+      // for (const constraint of all_constraints) {
+      for (const constraint of result.constraints.translated) {
         const e = constraint_to_html(constraint, true)
         constraints_view.appendChild(el('div', { style: 'margin-top: 0.4em;' }, e))
       }
     }
     catch (e: any) {
-      state.set({ tag: 'unknown' })
+      state2.set({ tag: 'exception', message: e.message })
       status_container.appendChild(el('div', { style: 'color: red;' },
         tel(TestId.exception_id, 'div', {}, 'Exception!'),
         e.message))
@@ -1164,15 +1339,34 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
     }
   }
 
+  // const invalidate = (): void => {
+  //   const last_state = state.get()
+  //   if (last_state.tag === 'invalidated') {
+  //     // do nothing!
+  //   } else if (last_state.tag === 'sat') {
+  //     state.set({ tag: 'invalidated', last: last_state })
+  //   } else {
+  //     state.set({ tag: 'waiting' })
+  //   }
+  // }
+
   const invalidate = (): void => {
-    const last_state = state.get()
+    const last_state = state2.get()
     if (last_state.tag === 'invalidated') {
       // do nothing!
-    } else if (last_state.tag === 'sat') {
-      state.set({ tag: 'invalidated', last: last_state })
+    } else if (last_state.tag === 'finished') {
+      state2.set({ tag: 'invalidated', last: last_state })
     } else {
-      state.set({ tag: 'waiting' })
+      state2.set({ tag: 'waiting' })
     }
+
+    // if (last_state.tag === 'invalidated') {
+    //   // do nothing!
+    // } else if (last_state.tag === 'sat') {
+    //   state.set({ tag: 'invalidated', last: last_state })
+    // } else {
+    //   state.set({ tag: 'waiting' })
+    // }
   }
 
   const model_part = el('div', {},
@@ -1181,25 +1375,45 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
   )
 
   const element = el('div', { class: 'model-finder' },
+    z3_status_container,
     generate_line,
+    cancel_button,
     model_part,
   )
 
-  state.watch((state) => {
+  const timeout_seconds = new Editable(0)
+  const { element: timeout_countdown_element, start: start_countdown, cancel: cancel_countdown } = timeout_element(timeout_seconds)
+
+  state2.watch((state, last_state) => {
+    console.log('model_finder state change', state)
+
     // Logic
-    if (state.tag === 'sat') {
-      model_assignments.set({ truth_table: state.truth_table, model: state.model, values: state.assignments })
-      // evaluators.multi_input.refresh()
+    if (state.tag === 'finished') {
+      if (state.solver_output.solver_output.status === 'sat') {
+        model_assignments2.set({ truth_table: state.truth_table, values: state.solver_output.solver_output.state_assignments })
+        // evaluators.multi_input.refresh()
+        evaluators.refresh()
+      // } else if (state.solver_output.solver_output.) {
+        // evaluators.multi_input.refresh()
+        // evaluators.refresh()
+      } else if (state.solver_output.solver_output.status === 'unsat') {
+        model_assignments2.set(undefined)
+      }
+    } else if (last_state?.tag !== 'looking' && state.tag === 'looking') {
+      start_countdown(timeout_ms.get() / 1000, () => { cancel(state.abort_controller) })
       evaluators.refresh()
-    } else if (state.tag === 'invalidated') {
-      // evaluators.multi_input.refresh()
-      evaluators.refresh()
-    } else if (state.tag === 'unsat') {
-      model_assignments.set(undefined)
+    }
+    if (last_state?.tag === 'looking' && state.tag !== 'looking') {
+      cancel_countdown()
     }
     
     // Display
+    // if (last_state?.tag === 'looking' && state.tag !== 'looking') {
+    //   cancel(last_state.abort_controller)
+    // }
+
     model_part.classList.remove('invalidated')
+    cancel_button.disabled = true
     if (state.tag === 'waiting') {
       right_side.innerHTML = ''
       state_display.innerHTML = ''
@@ -1207,39 +1421,60 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
       model_part.classList.add('invalidated')
       model_container.innerHTML = ''
       constraints_view.innerHTML = ''
+      generate_button.disabled = false
     } else if (state.tag === 'looking') {
       state_display.innerHTML = ''
       state_display.append(Constants.SEARCH)
-    } else if (state.tag === 'sat') {
-      state_display.innerHTML = ''
-      state_display.append(Constants.SAT)
-      const model_html = model_display(state.truth_table, state.assignments)
-      model_container.innerHTML = ''
-      model_container.appendChild(model_html)
-      right_side.appendChild(evaluators.element)
-    } else if (state.tag === 'unknown') {
-      state_display.innerHTML = ''
-      state_display.append(Constants.UNKNOWN)
-    } else if (state.tag === 'unsat') {
-      state_display.innerHTML = ''
-      state_display.append(Constants.UNSAT)
-      right_side.innerHTML = ''
+      state_display.append(' ')
+      state_display.appendChild(timeout_countdown_element)
+      generate_button.disabled = true
+      cancel_button.disabled = false
+    } else if (state.tag === 'finished') {
+      generate_button.disabled = false
+      if (state.solver_output.solver_output.status === 'sat') {
+        state_display.innerHTML = ''
+        state_display.append(Constants.SAT)
+        const model_html = model_display(state.truth_table, state.solver_output.solver_output.state_assignments)
+        model_container.innerHTML = ''
+        model_container.appendChild(model_html)
+        right_side.appendChild(evaluators.element)
+      } else if (state.solver_output.solver_output.status === 'unsat') {
+        state_display.innerHTML = ''
+        state_display.append(Constants.UNSAT)
+        right_side.innerHTML = ''
+      } else if (state.solver_output.solver_output.status === 'unknown') {
+        state_display.innerHTML = ''
+        state_display.append(Constants.UNKNOWN)
+      } else if (state.solver_output.solver_output.status === 'cancelled') {
+        state_display.innerHTML = ''
+        state_display.append(Constants.CANCELLED)
+      } else if (state.solver_output.solver_output.status === 'exception') {
+        state_display.innerHTML = ''
+        state_display.append(`Exception! ${state.solver_output.solver_output.message}`)
+      } else {
+        fallthrough('model_finder_display.state2.watch', state.solver_output.solver_output)
+      }
     } else if (state.tag === 'invalidated') {
       state_display.innerHTML = ''
       state_display.append('No up-to-date model to display')
       model_part.classList.add('invalidated')
+    } else if (state.tag === 'exception') {
     } else {
-      const check: Equiv<typeof state, never> = true
-      void check
+      fallthrough('model_finder_display.state.watch', state)
     }
   })
 
-  return { element, state, start_search, invalidate }
+  return { element, state: state2, start_search_solver, invalidate }
 }
 
 type Z3ContextState =
   | { tag: 'loading' }
   | { tag: 'ready', ctx: Context }
+  | { tag: 'error', message: string }
+
+type Z3SolverState =
+  | { tag: 'loading' }
+  | { tag: 'ready', solver: WrappedSolver }
   | { tag: 'error', message: string }
 
 // const generic_multi_input = <ParseOutput extends {}>(
@@ -1316,9 +1551,17 @@ const main = (): HTMLElement => {
   const constraint_block = new InputBlockLogic<Constraint, SplitInput>(
     parse_constraint,
     (logic) => split_input(logic, async (c) => constraint_to_html(c, true), Constants.CONSTRAINT_INPUT_PLACEHOLDER, test_ids.split))
-  const mi = generic_input_block(constraint_block, Constants.BATCH_CONSTRAINT_INPUT_PLACEHOLDER, test_ids)
 
+  const mi = generic_input_block(constraint_block, Constants.BATCH_CONSTRAINT_INPUT_PLACEHOLDER, test_ids)
   const model_finder = model_finder_display(constraint_block)
+
+  model_finder.state.watch((state, last_state) => {
+    if (last_state?.tag !== 'looking' && state.tag === 'looking') {
+      mi.set_disabled(true)
+    } else if (last_state?.tag === 'looking' && state.tag !== 'looking') {
+      mi.set_disabled(false)
+    }
+  })
 
   // const set_all_constraints = (all_constraints: Constraint[] | undefined) => {
   //   model_finder.invalidate()
@@ -1392,7 +1635,7 @@ const main = (): HTMLElement => {
   }
 
   window.onunhandledrejection = (event) => {
-    show_error(event.reason)
+    show_error(JSON.stringify(event.reason))
   }
 
   window.onerror = (event) => {
