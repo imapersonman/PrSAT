@@ -61,4 +61,5 @@ export const DIV0 = 'Division by zero!'
 export const NO_MODEL = 'No model to evaluate!'
 
 export const CANCEL_OVERRIDE_TIMEOUT_MS = 5 * 1000
+export const DEFAULT_SOLVE_TIMEOUT_MS = 1 * 1000 * 60
 

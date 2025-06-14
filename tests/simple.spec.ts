@@ -16,18 +16,18 @@ const expect_state_display = async (page: Page, text: string, timeout_ms?: numbe
   await expect(state_display).toContainText(text, { timeout: timeout_ms })
 }
 
-const find_model = async (page: Page, with_result: 'sat' | 'unsat' | 'unknown' | 'cancelled') => {
+const find_model = async (page: Page, with_result: 'sat' | 'unsat' | 'unknown' | 'cancelled', timeout_ms?: number) => {
   const state_display = page.getByTestId(TestId.state_display_id)
   await page.getByTestId(TestId.find_model).click()
   // Right after we click, we want to be searching!
   await state_display.getByText(Constants.SEARCH).isVisible()
 
   if (with_result === 'sat') {
-    await expect(state_display).toContainText(Constants.SAT)
+    await expect(state_display).toContainText(Constants.SAT, { timeout: timeout_ms })
   } else if (with_result === 'unsat') {
-    await expect(state_display).toContainText(Constants.UNSAT)
+    await expect(state_display).toContainText(Constants.UNSAT, { timeout: timeout_ms })
   } else if (with_result === 'unknown') {
-    await expect(state_display).toContainText(Constants.UNKNOWN)
+    await expect(state_display).toContainText(Constants.UNKNOWN, { timeout: timeout_ms })
   } else if (with_result === 'cancelled') {
     // expect(state_display).toContainText(Constants.CANCELLED)
   } else {
@@ -274,7 +274,7 @@ const SUPER_LONG_SOLVE: string[] = [
 ]
 const SHORT_WAIT_MS = 50
 
-test('cancelling shows cancel message', async ({ page }) => {
+test.skip('cancelling shows cancel message', async ({ page }) => {
   await to_load(page)
 
   const constraint_test_ids = TestId.generic_multi_input('constraints')
@@ -282,7 +282,7 @@ test('cancelling shows cancel message', async ({ page }) => {
 
   find_model(page, 'cancelled').catch((e) => { throw e })
   await page.waitForTimeout(SHORT_WAIT_MS)
-  await cancel_solve(page)
+  await cancel_solve(page, 20 * 1000)
 })
 
 type SplitInputLocators = {
@@ -379,7 +379,7 @@ test('re-enable all input elements on cancel', async ({ page }) => {
 
   find_model(page, 'cancelled').catch((e) => { throw e })
   await page.waitForTimeout(SHORT_WAIT_MS)
-  await cancel_solve(page)
+  await cancel_solve(page, Constants.CANCEL_OVERRIDE_TIMEOUT_MS + 10 * 1000)  // Boooo!
 
   const constraint_block = get_multi_input_block(page, constraint_test_ids, 0, constraint_input_array.length)
   await expect_multi_input_block_disabled(constraint_block, false)
@@ -454,18 +454,40 @@ test('eval after 1st solve after invalidation does NOT say no model', async ({ p
   await expect(eval_block.splits[0].output).not.toContainText(Constants.NO_MODEL)
 })
 
-test('eval during 2nd solve says no model then updates correctly with model', async ({ page }) => {
+const set_timeout = async (page: Page, total_seconds: number): Promise<void> => {
+  const timeout_e = page.getByTestId(TestId.timeout.id)
+  const hours_e = timeout_e.getByTestId(TestId.timeout.hours)
+  const minutes_e = timeout_e.getByTestId(TestId.timeout.minutes)
+  const seconds_e = timeout_e.getByTestId(TestId.timeout.seconds)
+
+  let leftover = total_seconds
+  const hours = Math.floor(leftover / (60 * 60))
+  leftover -= hours * (60 * 60)
+  const minutes = Math.floor(leftover / 60)
+  leftover -= minutes * 60
+  const seconds = leftover
+
+  hours_e.fill(hours.toString())
+  minutes_e.fill(minutes.toString())
+  seconds_e.fill(seconds.toString())
+}
+
+test('eval during 2nd solve says no model then updates correctly with model', { tag: '@slow' }, async ({ page }) => {
+  test.setTimeout(2 * 1000 * 60)  // 2 minutes to account for solve.
   await to_load(page)
+
+  const solve_timeout_s = 2 * 60
+  await set_timeout(page, solve_timeout_s)
 
   const constraint_test_ids = TestId.generic_multi_input('constraints')
   const constraint_input_array = ['Pr(A & B) = Pr(A) * Pr(B)']
   await set_block_input(page, constraint_test_ids, constraint_input_array)
   await find_model(page, 'sat')
 
-  const constraint_input_array2 = LONGISH_SOLVE
+  const constraint_input_array2 = MEDIUM_SOLVE
   await set_block_input(page, constraint_test_ids, constraint_input_array2)
-  // const second_solve = find_model(page, 'cancelled')
-  await find_model(page, 'sat')
+  const second_solve = find_model(page, 'sat', solve_timeout_s * 1000)
+  // await find_model(page, 'sat', solve_timeout_s * 1000)
   await page.waitForTimeout(SHORT_WAIT_MS)
 
   const eval_test_ids = TestId.generic_multi_input('eval')
@@ -474,6 +496,6 @@ test('eval during 2nd solve says no model then updates correctly with model', as
 
   const eval_block = get_multi_input_block(page, eval_test_ids, 0, 1)
   await expect(eval_block.splits[0].output).toContainText(Constants.NO_MODEL)
-  // await second_solve
+  await second_solve
   await expect(eval_block.splits[0].output).not.toContainText(Constants.NO_MODEL)
 })

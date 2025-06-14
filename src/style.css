@@ -126,6 +126,7 @@ input[type=button].options {
   background-color: rgb(240, 240, 240);
   /* width: fit-content; */
   padding: 0.4em;
+  overflow-x: scroll;
 }
 
 .invalidated {
@@ -153,6 +154,7 @@ input::file-selector-button {
   padding: 0.4em;
   width: fit-content;
   border-radius: 0.4em;
+  overflow-x: scroll;
 }
 
 .info-container {

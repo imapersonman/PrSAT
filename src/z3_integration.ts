@@ -1,8 +1,8 @@
-import { Arith, Bool, Context, Expr, init, Model, Solver, Z3HighLevel, Z3LowLevel } from "z3-solver"
+import { Arith, Bool, Context, Expr, init, Model, Z3HighLevel, Z3LowLevel } from "z3-solver"
 import { match_s, S, spv, clause, s_to_string, default_clause } from "./s"
 import { constraints_to_smtlib_lines, eliminate_state_variable_index, enrich_constraints, parse_s, real_expr_to_smtlib, translate, TruthTable, variables_in_constraints, state_index_id, constraint_to_smtlib, translate_constraint, translate_real_expr, free_variables_in_constraint_or_real_expr as free_sentence_variables_in_constraint_or_real_expr, LetterSet, free_real_variables_in_constraint_or_real_expr, VariableLists, div0_conditions_in_constraint_or_real_expr, translate_constraint_or_real_expr, eliminate_state_variable_index_in_constraint_or_real_expr } from "./pr_sat"
 import { ConstraintOrRealExpr, PrSat } from "./types"
-import { as_array, assert, assert_exists, assert_result, fallthrough, Res } from "./utils"
+import { as_array, assert, assert_exists, assert_result, fallthrough, Res, sleep } from "./utils"
 import { createExpect } from "vitest"
 
 type RealExpr = PrSat['RealExpr']
@@ -702,6 +702,7 @@ export type WrappedSolverResult =
 type SolverOptions2 = {
   regular: boolean
   abort_signal?: AbortSignal
+  cancel_fallback?: () => Promise<undefined>
 }
 
 const DEFAULT_SOLVER_OPTIONS2: SolverOptions2 = {
@@ -725,7 +726,7 @@ export const pr_sat_wrapped = async (
   constraints: Constraint[],
   options?: Partial<SolverOptions2>,
 ): Promise<PrSATResult> => {
-  const { regular, abort_signal } = { ...DEFAULT_SOLVER_OPTIONS2, ...(options ?? {}) }
+  const { regular, abort_signal, cancel_fallback } = { ...DEFAULT_SOLVER_OPTIONS2, ...(options ?? {}) }
 
   const translated = translate(tt, constraints)
   const index_to_eliminate = tt.n_states() - 1  // Only this works right now!
@@ -733,7 +734,7 @@ export const pr_sat_wrapped = async (
   const [redef, elim_constraints] = eliminate_state_variable_index(tt.n_states(), index_to_eliminate, enriched_constraints)
 
   const smtlib_lines = constraints_to_smtlib_lines(tt, index_to_eliminate, elim_constraints)
-  const result = await solver.solve(smtlib_lines, abort_signal)
+  const result = await solver.solve(smtlib_lines, abort_signal, cancel_fallback)
   const output_constraints = {
     original: constraints,
     translated,
@@ -762,48 +763,141 @@ export const pr_sat_wrapped = async (
   }
 }
 
+// I should probably be running z3 inside of a worker.
+// Then I could just kill it if it's taking too long to cancel normally.
+// Whatever I'll just be weird and do this instead.
+
+export const run_solve_cancel_logic = async <R>(
+  on_run: (signal?: AbortSignal) => Promise<R>,
+  on_cancel: () => Promise<R>,
+  on_slow_cancel: () => Promise<R>,
+  cancel_timeout_ms: number,  // amount of time into running on_cancel that we go ahead and call on_slow_cancel.
+  abort_signal?: AbortSignal,
+): Promise<R> => {
+  // This function is about to get more complicated -- yay!
+  // On cancel, attempt interrupt.
+  // If the interrupt succeeds within a certain timeout, resolve with a 'cancel' status.
+  // If the interrupt does NOT succeed within the timeout, resolve anyway with a 'cancel' status.
+  // Otherwise everything else should resolve normally.
+
+  // The ways the Promise can resolve:
+  // - on_run finishes.
+  // - abort_signal.abort event and on_cancel finishes before given cancel timeout.
+  // - abort_signal.abort event and on_cancel finishes after given cancel timeout (on_slow_cancel).
+
+  const user_cancel = new Promise<{ tag: 'cancelled' }>((resolve) => {
+    abort_signal?.addEventListener('abort', () => {
+      resolve({ tag: 'cancelled' })
+    })
+  })
+
+  const run = on_run(abort_signal).then((r) => ({ tag: 'finished' as const, result: r }))
+  const result = await Promise.race([
+    run,
+    user_cancel,
+  ])
+
+  if (result.tag === 'finished') {
+    return result.result
+  } else if (result.tag === 'cancelled') {
+    const cancel_result = await on_cancel()
+    const result = await Promise.race([
+      // If we're at this point, just assume that the run finishes BECAUSE it was cancelled.
+      // Ignore the result, though, as it's (best-case) garbage.
+      run.then(() => ({ tag: 'finished' as const, result: cancel_result })),
+      // on_cancel().then((r) => ({ tag: 'finished' as const, result: r })),
+      sleep(cancel_timeout_ms).then(() => ({ tag: 'cancelled' as const })),
+    ])
+
+    if (result.tag === 'finished') {
+      return result.result
+    } else if (result.tag === 'cancelled') {
+      return await on_slow_cancel()
+    } else {
+      return fallthrough('run_solve_cancel_logic', result)
+    }
+  } else {
+    return fallthrough('run_solve_cancel_logic', result)
+  }
+}
+
 export class WrappedSolver {
-  constructor(private readonly z3_interface: Z3HighLevel & Z3LowLevel) {}
+  constructor(private z3_interface: (Z3HighLevel & Z3LowLevel) | undefined, private readonly init: () => Promise<(Z3HighLevel & Z3LowLevel) | undefined>) {
+  }
 
-  async solve(smtlib_lines: S[], abort_signal?: AbortSignal): Promise<WrappedSolverResult> {
-    const used_ctx = this.z3_interface.Context('main')
-    const solver = new used_ctx.Solver('QF_NRA')
-    const smtlib_lines_string = smtlib_lines.map((s) => s_to_string(s, false)).join('\n')
+  private async reinitialize(): Promise<void> {
+    const old = this.z3_interface
 
-    try {
-      solver.fromString(smtlib_lines_string)
-    } catch (e: any) {
-      console.error('smtlib_lines:\n', smtlib_lines_string)
-      throw e
-    }
+    this.z3_interface = await this.init()
+    console.log('reinitialized?', old !== this.z3_interface)
+  }
 
-    let interrupted = false
-    const on_abort = () => {
-      interrupted = true
-      used_ctx.interrupt()
-    }
-    abort_signal?.addEventListener('abort', on_abort)
+  async solve(smtlib_lines: S[], abort_signal?: AbortSignal, cancel_fallback?: () => Promise<undefined>): Promise<WrappedSolverResult> {
+    // This function is about to get more complicated -- yay!
+    // On cancel, attempt interrupt.
+    // If the interrupt succeeds within a certain timeout, resolve with a 'cancel' status.
+    // If the interrupt does NOT succeed within the timeout, resolve anyway with a 'cancel' status.
+    // Otherwise everything else should resolve normally.
+    // This logic is complex enough it might be a good idea to make this mockable.
 
-    try {
-      const result = await solver.check()
-      if (result === 'sat') {
-        const model = solver.model()
-        const evaluate = async (tt: TruthTable, c_or_re: ConstraintOrRealExpr): Promise<FancyEvaluatorOutput> => {
-          return await fancy_evaluate_constraint_or_real_expr(used_ctx, model, tt, c_or_re)
-        }
-        const state_assignments = await model_to_assignments(used_ctx, model)
-        return { status: 'sat', evaluate, state_assignments }
-      } else {
-        if (interrupted) {
+    // const used_ctx = this.z3_interface.Context('main')
+    // const solver = new used_ctx.Solver('QF_NRA')
+    // const smtlib_lines_string = smtlib_lines.map((s) => s_to_string(s, false)).join('\n')
+
+    return await run_solve_cancel_logic<WrappedSolverResult>(
+      async (abort_signal?: AbortSignal): Promise<WrappedSolverResult> => {  // on_run
+        if (this.z3_interface === undefined) {
           return { status: 'cancelled' }
-        } else {
-          return { status: result }
         }
-      }
-    } catch (e: any) {
-      return { status: 'exception', message: e.message }
-    } finally {
-      abort_signal?.removeEventListener('abort', on_abort)
-    }
+
+        const used_ctx = this.z3_interface.Context('main')
+        const solver = new used_ctx.Solver('QF_NRA')
+        const smtlib_lines_string = smtlib_lines.map((s) => s_to_string(s, false)).join('\n')
+
+        try {
+          solver.fromString(smtlib_lines_string)
+        } catch (e: any) {
+          console.error('smtlib_lines:\n', smtlib_lines_string)
+          throw e
+        }
+
+        // let interrupted = false
+        const on_abort = () => {
+          // interrupted = true
+          used_ctx.interrupt()
+        }
+        abort_signal?.addEventListener('abort', on_abort)
+
+        try {
+          const result = await solver.check()
+          if (result === 'sat') {
+            const model = solver.model()
+            const evaluate = async (tt: TruthTable, c_or_re: ConstraintOrRealExpr): Promise<FancyEvaluatorOutput> => {
+              return await fancy_evaluate_constraint_or_real_expr(used_ctx, model, tt, c_or_re)
+            }
+            const state_assignments = await model_to_assignments(used_ctx, model)
+            return { status: 'sat', evaluate, state_assignments }
+          } else {
+            return { status: result }
+          }
+        } catch (e: any) {
+          return { status: 'exception', message: e.message }
+        } finally {
+          abort_signal?.removeEventListener('abort', on_abort)
+        }
+
+      },
+      async () => {  // on_cancel
+        return { status: 'cancelled' }
+      },
+      async () => {  // on_slow_cancel
+        console.log('attempting slow cancel...')
+        await cancel_fallback?.()
+        await this.reinitialize()
+        return { status: 'cancelled' }
+      },
+      2 * 2000,  // two seconds before slow_cancel
+      abort_signal,
+    )
   }
 }

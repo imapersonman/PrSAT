@@ -1,7 +1,7 @@
 import { Context, Model, Z3HighLevel, Z3LowLevel } from "z3-solver";
 import { AsyncEditable, Editable, rEditable } from './editable';
 import { el, math_el, tel } from "./el";
-import { assert, assert_exists, fallthrough } from "./utils";
+import { assert, assert_exists, fallthrough, sleep } from "./utils";
 import { parse_constraint, parse_constraint_or_real_expr } from "./parser";
 import { constraint_to_string, letter_string, TruthTable, variables_in_constraints } from "./pr_sat";
 import { fancy_evaluate_constraint_or_real_expr, FancyEvaluatorOutput, init_z3, ModelAssignmentOutput, pr_sat_with_options, pr_sat_wrapped, PrSATResult, WrappedSolver, WrappedSolverResult } from "./z3_integration";
@@ -970,16 +970,23 @@ const model_evaluators = (
   return { element, refresh  }
 }
 
-const seconds_to_time_string = (total_seconds: number) => {
-  assert(Number.isInteger(total_seconds))
-  let leftover = total_seconds
-  const hours = Math.floor(leftover / 3600)
-  leftover -= hours * 3600
-  const minutes = Math.floor(leftover / 60)
-  leftover -= minutes * 60
-  const seconds = leftover
+const seconds_to_hms = (total_seconds: number): { h: number, m: number, s: number } => {
+  const ts = Math.floor(total_seconds)
 
+  let leftover = ts
+  const h = Math.floor(leftover / 3600)
+  leftover -= h * 3600
+  const m = Math.floor(leftover / 60)
+  leftover -= m * 60
+  const s = leftover
+
+  return { h, m, s }
+}
+
+const seconds_to_time_string = (total_seconds: number) => {
+  const { h: hours, m: minutes, s: seconds } = seconds_to_hms(total_seconds)
   let split_str: string[] = []
+
   if (hours > 0) {
     split_str.push(`${hours}h`)
   }
@@ -1001,13 +1008,14 @@ const timeout = (timeout_ms: Editable<number>) => {
   const MIN_SCS = 0
   const MAX_SCS = 59
 
-  const DEF_HRS = MIN_HRS
-  const DEF_MNS = MIN_MNS
-  const DEF_SCS = 1
+  const { h, m, s } = seconds_to_hms(timeout_ms.get() / 1000)
+  const DEF_HRS = h
+  const DEF_MNS = m
+  const DEF_SCS = s
 
-  const hi = el('input', { style: 'margin-right: 0.5ch; margin-bottom: 0.1ch;', type: 'number', min: MIN_HRS.toString(), max: MAX_HRS.toString(), value: DEF_HRS.toString() }) as HTMLInputElement
-  const mi = el('input', { style: 'margin-right: 0.5ch; margin-bottom: 0.1ch', type: 'number', min: MIN_MNS.toString(), max: MAX_MNS.toString(), value: DEF_MNS.toString() }) as HTMLInputElement
-  const si = el('input', { style: 'margin-right: 0.5ch;', type: 'number', min: MIN_SCS.toString(), max: MAX_SCS.toString(), value: DEF_SCS.toString() }) as HTMLInputElement
+  const hi = tel(TestId.timeout.hours, 'input', { style: 'margin-right: 0.5ch; margin-bottom: 0.1ch;', type: 'number', min: MIN_HRS.toString(), max: MAX_HRS.toString(), value: DEF_HRS.toString() }) as HTMLInputElement
+  const mi = tel(TestId.timeout.minutes, 'input', { style: 'margin-right: 0.5ch; margin-bottom: 0.1ch', type: 'number', min: MIN_MNS.toString(), max: MAX_MNS.toString(), value: DEF_MNS.toString() }) as HTMLInputElement
+  const si = tel(TestId.timeout.seconds, 'input', { style: 'margin-right: 0.5ch;', type: 'number', min: MIN_SCS.toString(), max: MAX_SCS.toString(), value: DEF_SCS.toString() }) as HTMLInputElement
 
   const set_timeout_ms = () => {
     const h = parseInt(hi.value)
@@ -1041,7 +1049,7 @@ const timeout = (timeout_ms: Editable<number>) => {
     set_timeout_ms()
   }
 
-  return el('div', {},
+  return tel(TestId.timeout.id, 'div', {},
     el('label', { style: 'display: block;' }, hi, 'hour(s)'),
     el('label', { style: 'display: block;' }, mi, 'minute(s)'),
     el('label', { style: 'display: block;' }, si, 'second(s)'),
@@ -1050,13 +1058,11 @@ const timeout = (timeout_ms: Editable<number>) => {
 
 const timeout_countdown = (timeout_seconds: Editable<number>, at_zero: () => void): { cancel: () => void } => {
   assert(timeout_seconds.get() >= 0, 'Start of timeout countdown is < 0 for some reason!')
-  console.log('starting countdown')
   if (timeout_seconds.get() <= 0) {
     at_zero()
   }
 
   const cancel = () => {
-    console.log('cancelling countdown!')
     clearInterval(interval)
   }
 
@@ -1075,7 +1081,7 @@ const timeout_countdown = (timeout_seconds: Editable<number>, at_zero: () => voi
 
 const timeout_element = (timeout_seconds: Editable<number>): { element: HTMLElement, start: (timeout: number, at_zero: () => void) => void, cancel: () => void } => {
   const e = el('span', {}, seconds_to_time_string(timeout_seconds.get()))
-  const watcher = timeout_seconds.watch((seconds_left) => {
+  timeout_seconds.watch((seconds_left) => {
     e.innerHTML = ''
     e.append(seconds_to_time_string(seconds_left))
   })
@@ -1087,9 +1093,7 @@ const timeout_element = (timeout_seconds: Editable<number>): { element: HTMLElem
     start: (timeout: number, at_zero: () => void) => {
       timeout_seconds.set(timeout)
       countdown = timeout_countdown(timeout_seconds, () => {
-        watcher.unwatch()
         at_zero()
-        console.log('OUTER ZERO STUFF!')
       })
     },
     cancel: () => {
@@ -1103,9 +1107,8 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
   const state2 = new Editable<ModelFinderState2>({ tag: 'waiting' })
   const model_container = el('div', { class: 'model-container' })
   const state_display = tel(TestId.state_display_id, 'div', {})
-  const status_container = el('div', {}, state_display)
+  const status_container = el('div', { style: 'margin-top: 0.4em;' }, state_display)
   const left_side = el('div', { style: 'border-right: solid gainsboro; padding-right: 1em;' },
-    status_container,
     model_container,
   )
   // const z3_state = new Editable<Z3ContextState>({ tag: 'loading' })
@@ -1128,7 +1131,7 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
   const z3_status_container = tel(TestId.z3_status, 'div', { style: 'margin-bottom: 0.4em;' })
   const is_regular = new Editable(false)
   const regular_toggle = tel(TestId.regular_toggle, 'input', { type: 'checkbox', style: 'margin-left: 0.4em;' }, 'Regular') as HTMLInputElement
-  const timeout_ms = new Editable(1000)
+  const timeout_ms = new Editable(Constants.DEFAULT_SOLVE_TIMEOUT_MS)
   const timeout_input = timeout(timeout_ms)
   timeout_ms.watch((ms) => { console.log('timeout set to:', ms) })
   const generate_line = el('div', { style: 'display: flex;' },
@@ -1174,25 +1177,52 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
   // }
 
   // load_z3()
+  const init_z3_after_first_time_boo = async () => {
+    const state = z3_state2.get()
+    if (state.tag !== 'ready') {
+      throw new Error('Function should only be called after z3 has been properly loaded at least once.')
+    }
+
+    try {
+      z3_state2.set({ tag: 'loading' })
+      const z3_interface = await init_z3()
+      await sleep(1000)
+      z3_state2.set({ tag: 'ready', solver: state.solver })
+      return z3_interface
+    } catch (e: any) {
+      z3_state2.set({ tag: 'error', message: e.message })
+      return undefined
+    }
+  }
+  // init_z3_and_everything_else()
+  //   .catch((e) => { throw e })
+
   init_z3()
     .then((z3_interface) => {
       // z3_state.set({ tag: 'ready', ctx })
-      z3_state2.set({ tag: 'ready', solver: new WrappedSolver(z3_interface) })
+      z3_state2.set({ tag: 'ready', solver: new WrappedSolver(z3_interface, init_z3_after_first_time_boo) })
     })
     .catch((error) => {
       // z3_state.set({ tag: 'error', message: error.message })
       z3_state2.set({ tag: 'error', message: error.message })
     })
   
+  // gross
+  let already_initialized = false
+  
   // z3_state.watch((state) => {
   z3_state2.watch((state) => {
+    console.log('z3_state change', z3_state2.get())
     z3_status_container.innerHTML = ''
     if (state.tag === 'loading') {
       z3_status_container.append('Loading Z3...')
       generate_button.disabled = true
     } else if (state.tag === 'ready') {
       // z3_is_ready(state.ctx)
-      z3_is_ready_2(state.solver)
+      if (!already_initialized) {
+        already_initialized = true
+        z3_is_ready_2(state.solver)
+      }
       set_all_constraints(constraint_block.get_output())
     } else if (state.tag === 'error') {
       z3_status_container.append(state.message)
@@ -1219,31 +1249,31 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
     state_display.append(Constants.CANCELLING)
     abort_controller.abort()
     // This is a hack to just abandon an old solve/ctx if it takes too long to cancel, which is likely if a solve has been running for a while.
-    setTimeout(() => {
-      // This currently has a bug where if you cancel then start again within the timeout, the new solve will be cancelled, which is lame.
-      // Damn this could lead to a bug: what if the cancel succeeds at some point in the future?
-      //                                What if this happens during another solve?
-      //                                Then that other solve will appear to have been interrupted, which is BAD.
-      //                                The only solution I can think of is ignoring cancelled states, but that's dumb.
-      const state = state2.get()
-      if (state.tag === 'looking') {
-        // If it's still looking, just cancel it for realsies.
-        state2.set({
-          tag: 'finished',
-          truth_table: state.truth_table,
-          solver_output: {
-            constraints: {
-              original: [],
-              translated: [],
-              extra: [],
-              eliminated: [],
-            },
-            // We really just want the cancelled part set correctly.
-            solver_output: { status: 'cancelled' }
-          }
-        })
-      }
-    }, Constants.CANCEL_OVERRIDE_TIMEOUT_MS)
+    // setTimeout(() => {
+    //   // This currently has a bug where if you cancel then start again within the timeout, the new solve will be cancelled, which is lame.
+    //   // Damn this could lead to a bug: what if the cancel succeeds at some point in the future?
+    //   //                                What if this happens during another solve?
+    //   //                                Then that other solve will appear to have been interrupted, which is BAD.
+    //   //                                The only solution I can think of is ignoring cancelled states, but that's dumb.
+    //   const state = state2.get()
+    //   if (state.tag === 'looking') {
+    //     // If it's still looking, just cancel it for realsies.
+    //     state2.set({
+    //       tag: 'finished',
+    //       truth_table: state.truth_table,
+    //       solver_output: {
+    //         constraints: {
+    //           original: [],
+    //           translated: [],
+    //           extra: [],
+    //           eliminated: [],
+    //         },
+    //         // We really just want the cancelled part set correctly.
+    //         solver_output: { status: 'cancelled' }
+    //       }
+    //     })
+    //   }
+    // }, Constants.CANCEL_OVERRIDE_TIMEOUT_MS)
   }
 
   const z3_is_ready_2 = (solver: WrappedSolver) => {
@@ -1297,6 +1327,23 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
   //   }
   // }
 
+  // hack to get timeouts working BOO.
+  (async () => {
+    const old_constraints_text = localStorage.getItem('constraints')
+    if (old_constraints_text !== null) {
+      console.log('Setting from old constraints text')
+      const lines = old_constraints_text.split('\n')
+      await constraint_block.set_fields(lines)
+      localStorage.removeItem('constraints')
+    }
+  })().catch(() => {})
+
+  const cancel_fallback = async (): Promise<undefined> => {
+    console.log('cancel fallback')
+    localStorage.setItem('constraints', constraint_block.get_fields().join('\n'))
+    window.location.reload()  // boooooooooooooooo!
+  }
+
   const start_search_solver = async (solver: WrappedSolver, constraints: Constraint[], is_regular: boolean): Promise<void> => {
     const truth_table = new TruthTable(variables_in_constraints(constraints))
     // state.set({ tag: 'looking', truth_table })
@@ -1308,7 +1355,7 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
       model_container.appendChild(tt_display)
       // const { status, all_constraints, state_values, model } = await pr_sat_with_truth_table(ctx, truth_table, constraints, is_regular)
       // const result = await pr_sat_with_options(ctx, truth_table, constraints, { regular: is_regular, timeout_ms: timeout_ms.get() })
-      const result = await pr_sat_wrapped(solver, truth_table, constraints, { regular: is_regular, abort_signal: abort_controller.signal })
+      const result = await pr_sat_wrapped(solver, truth_table, constraints, { regular: is_regular, abort_signal: abort_controller.signal, cancel_fallback })
       state2.set({ tag: 'finished', truth_table, solver_output: result })
       // const { status, all_constraints, model } = result
       // if (result.solver_output.status === 'sat') {
@@ -1370,6 +1417,7 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
   }
 
   const model_part = el('div', {},
+    status_container,
     split_view,
     constraints_view,
   )
@@ -1450,7 +1498,7 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
         state_display.append(Constants.CANCELLED)
       } else if (state.solver_output.solver_output.status === 'exception') {
         state_display.innerHTML = ''
-        state_display.append(`Exception! ${state.solver_output.solver_output.message}`)
+        state_display.appendChild(el('span', {}, `Exception! ${state.solver_output.solver_output.message}`))
       } else {
         fallthrough('model_finder_display.state2.watch', state.solver_output.solver_output)
       }

@@ -86,3 +86,10 @@ export const batch_input = readonly({
 })
 
 export const cancel_id = 'cancel'
+
+export const timeout = readonly({
+  id: 'timeout',
+  hours: 'timeout-hours',
+  minutes: 'timeout-minutes',
+  seconds: 'timeout-seconds',
+})

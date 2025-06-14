@@ -199,3 +199,18 @@ export const as_array = <T, O>(t: T[] | O, message: string = 'Expected array!'):
 export const readonly = <T extends {}>(t: T): Readonly<T> => {
     return t
 }
+
+// Returns true if cancelled, false otherwise.
+export const sleep = async (timeout_ms: number, abort_signal?: AbortSignal): Promise<boolean> => {
+    return new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+            resolve(false)
+        }, timeout_ms)
+
+        const on_cancel = () => {
+            clearTimeout(timeout)
+            resolve(true)
+        }
+        abort_signal?.addEventListener('abort', on_cancel)
+    })
+}
