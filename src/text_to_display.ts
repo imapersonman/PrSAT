@@ -1,13 +1,11 @@
-import { Context, Model, Z3HighLevel, Z3LowLevel } from "z3-solver";
-import { AsyncEditable, Editable, rEditable } from './editable';
+import { Editable, rEditable } from './editable';
 import { el, math_el, tel } from "./el";
 import { assert, assert_exists, fallthrough, sleep } from "./utils";
 import { parse_constraint, parse_constraint_or_real_expr } from "./parser";
-import { constraint_to_string, letter_string, TruthTable, variables_in_constraints } from "./pr_sat";
-import { fancy_evaluate_constraint_or_real_expr, FancyEvaluatorOutput, init_z3, ModelAssignmentOutput, pr_sat_with_options, pr_sat_wrapped, PrSATResult, WrappedSolver, WrappedSolverResult } from "./z3_integration";
+import { letter_string, TruthTable, variables_in_constraints } from "./pr_sat";
+import { FancyEvaluatorOutput, init_z3, ModelAssignmentOutput, pr_sat_wrapped, PrSATResult, WrappedSolver, WrappedSolverResult } from "./z3_integration";
 import { s_to_string } from "./s";
 import { ConstraintOrRealExpr, PrSat } from "./types";
-import { Equiv } from "./tag_map";
 import { InputBlockLogic } from "./display_logic";
 import { constraint_to_html, real_expr_to_html, state_id } from "./prsat_to_html";
 import { generic_input_block, split_input, SplitInput } from "./block_playground";
@@ -784,13 +782,13 @@ const model_display = (tt: TruthTable, model_assignments: Record<number, ModelAs
 //   return { element, options: opts }
 // }
 
-type ModelFinderState =
-  | { tag: 'waiting' }
-  | { tag: 'looking', truth_table: TruthTable }
-  | { tag: 'sat', truth_table: TruthTable, model: Model, assignments: Record<number, ModelAssignmentOutput> }
-  | { tag: 'unsat', truth_table: TruthTable }
-  | { tag: 'unknown' }
-  | { tag: 'invalidated', last: { truth_table: TruthTable } }
+// type ModelFinderState =
+//   | { tag: 'waiting' }
+//   | { tag: 'looking', truth_table: TruthTable }
+//   | { tag: 'sat', truth_table: TruthTable, model: Model, assignments: Record<number, ModelAssignmentOutput> }
+//   | { tag: 'unsat', truth_table: TruthTable }
+//   | { tag: 'unknown' }
+//   | { tag: 'invalidated', last: { truth_table: TruthTable } }
 
 type ModelFinderState2 =
   | { tag: 'waiting' }
@@ -1515,10 +1513,10 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
   return { element, state: state2, start_search_solver, invalidate }
 }
 
-type Z3ContextState =
-  | { tag: 'loading' }
-  | { tag: 'ready', ctx: Context }
-  | { tag: 'error', message: string }
+// type Z3ContextState =
+//   | { tag: 'loading' }
+//   | { tag: 'ready', ctx: Context }
+//   | { tag: 'error', message: string }
 
 type Z3SolverState =
   | { tag: 'loading' }

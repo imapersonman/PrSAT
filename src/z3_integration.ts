@@ -3,7 +3,6 @@ import { match_s, S, spv, clause, s_to_string, default_clause } from "./s"
 import { constraints_to_smtlib_lines, eliminate_state_variable_index, enrich_constraints, parse_s, real_expr_to_smtlib, translate, TruthTable, variables_in_constraints, state_index_id, constraint_to_smtlib, translate_constraint, translate_real_expr, free_variables_in_constraint_or_real_expr as free_sentence_variables_in_constraint_or_real_expr, LetterSet, free_real_variables_in_constraint_or_real_expr, VariableLists, div0_conditions_in_constraint_or_real_expr, translate_constraint_or_real_expr, eliminate_state_variable_index_in_constraint_or_real_expr } from "./pr_sat"
 import { ConstraintOrRealExpr, PrSat } from "./types"
 import { as_array, assert, assert_exists, assert_result, fallthrough, Res, sleep } from "./utils"
-import { createExpect } from "vitest"
 
 type RealExpr = PrSat['RealExpr']
 type Constraint = PrSat['Constraint']
