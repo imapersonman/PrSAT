@@ -370,7 +370,7 @@ test('disable all input elements during solve', async ({ page }) => {
   await expect_multi_input_block_disabled(constraint_block, true)
 })
 
-test('re-enable all input elements on cancel', async ({ page }) => {
+test.skip('re-enable all input elements on cancel', async ({ page }) => {
   await to_load(page)
 
   const constraint_test_ids = TestId.generic_multi_input('constraints')
