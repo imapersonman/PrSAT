@@ -1713,7 +1713,7 @@ const main = (): HTMLElement => {
         el('a', { href: 'mailto:adjorlolo.k@northeastern.edu' }, 'Koissi Adjorlolo'),
         '.'),
       el('br', {}),
-      el('div', {}, el('a', { href: '' }, 'Here is a brief video demo of the software'), '.'),
+      el('div', {}, el('a', { href: 'https://youtu.be/IGHjYUI0CL4' }, 'Here is a brief video demo of the software'), '.'),
     ),
     // throw_button,
     global_error_display,
