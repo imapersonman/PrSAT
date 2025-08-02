@@ -84,6 +84,9 @@ export const real_expr_to_html = (expr: RealExpr, wrap_in_math_element: boolean)
       const rp = math_el('mo', {}, ')')
       return math_el('mrow', {}, lead, lp, s2h(expr.arg), mid, s2h(expr.given), rp)
     } else if (expr.tag === 'state_variable_sum') {
+      if (expr.indices.length === 0) {
+        return math_el('mi', {}, '0')
+      }
       const e = math_el('mrow', {})
       for (const [index, si] of expr.indices.entries()) {
         const summand = state_id(si)
