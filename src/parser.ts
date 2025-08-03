@@ -114,12 +114,14 @@ const ConstraintLang = P.createLanguage({
   CIff: (r) => r.ConstraintFactor.sepBy(P.optWhitespace.skip(ctag_to_c_parser('biconditional')).skip(P.optWhitespace))
     .assert((operands) => operands.length >= 2, 'Imp expects at least 2 operands!')
     .map((operands) => operands.reduceRight((pv, cv) => iff(cv, pv))),
+  
+  ProbabilityLead: () => P.alt(P.string('Pr('), P.string('P('), P.string('p(')),
 
   RealExprBase: (r) => P.alt(
     P.string('(').then(P.optWhitespace).then(r.RealExpr).skip(P.optWhitespace).skip(P.string(')')),
-    P.seq(P.string('Pr('), P.optWhitespace, r.Sentence, P.optWhitespace, P.string('|'), P.optWhitespace, r.Sentence, P.optWhitespace, P.string(')'))
+    P.seq(r.ProbabilityLead, P.optWhitespace, r.Sentence, P.optWhitespace, P.string('|'), P.optWhitespace, r.Sentence, P.optWhitespace, P.string(')'))
       .map(([_lp, _lw, s, _mlw, _sep, _mrw, r]) => cpr(s, r)),
-    P.string('Pr(').then(P.optWhitespace).then(r.Sentence).skip(P.optWhitespace).skip(P.string(')'))
+    r.ProbabilityLead.then(P.optWhitespace).then(r.Sentence).skip(P.optWhitespace).skip(P.string(')'))
       .map((s) => pr(s)),
     P.regexp(/[0-9]+(\.[0-9]+)?/).map((n) => parseFloat(n)),
     P.regexp(/[A-Za-z]+/).map((n) => vbl(n)),
