@@ -716,6 +716,7 @@ export type PrSATResult = {
     extra: Constraint[]
     eliminated: Constraint[]
   }
+  smtlib_input: string,
   solver_output: WrappedSolverResult
 }
 
@@ -733,7 +734,9 @@ export const pr_sat_wrapped = async (
   const [redef, elim_constraints] = eliminate_state_variable_index(tt.n_states(), index_to_eliminate, enriched_constraints)
 
   const smtlib_lines = constraints_to_smtlib_lines(tt, index_to_eliminate, elim_constraints)
-  const result = await solver.solve(smtlib_lines, abort_signal, cancel_fallback)
+  const smtlib_string = smtlib_lines.map((s) => s_to_string(s, false)).join('\n')
+  // const result = await solver.solve(smtlib_lines, abort_signal, cancel_fallback)
+  const result = await solver.solve(smtlib_string, abort_signal, cancel_fallback)
   const output_constraints = {
     original: constraints,
     translated,
@@ -749,6 +752,7 @@ export const pr_sat_wrapped = async (
 
     return {
       constraints: output_constraints,
+      smtlib_input: smtlib_string + `\n(check-sat)\n(get-model)`,
       solver_output: {
         ...result,
         state_assignments: { ...result.state_assignments, [index_to_eliminate]: elim_var_value.result },
@@ -757,6 +761,7 @@ export const pr_sat_wrapped = async (
   } else {
     return {
       constraints: output_constraints,
+      smtlib_input: smtlib_string + `\n(check-sat)`,
       solver_output: result,
     }
   }
@@ -831,7 +836,8 @@ export class WrappedSolver {
     console.log('reinitialized?', old !== this.z3_interface)
   }
 
-  async solve(smtlib_lines: S[], abort_signal?: AbortSignal, cancel_fallback?: () => Promise<undefined>): Promise<WrappedSolverResult> {
+  // async solve(smtlib_lines: S[], abort_signal?: AbortSignal, cancel_fallback?: () => Promise<undefined>): Promise<WrappedSolverResult> {
+  async solve(smtlib_string: string, abort_signal?: AbortSignal, cancel_fallback?: () => Promise<undefined>): Promise<WrappedSolverResult> {
     // This function is about to get more complicated -- yay!
     // On cancel, attempt interrupt.
     // If the interrupt succeeds within a certain timeout, resolve with a 'cancel' status.
@@ -851,7 +857,8 @@ export class WrappedSolver {
 
         const used_ctx = this.z3_interface.Context('main')
         const solver = new used_ctx.Solver('QF_NRA')
-        const smtlib_lines_string = smtlib_lines.map((s) => s_to_string(s, false)).join('\n')
+        // const smtlib_lines_string = smtlib_lines.map((s) => s_to_string(s, false)).join('\n')
+        const smtlib_lines_string = smtlib_string
 
         try {
           solver.fromString(smtlib_lines_string)

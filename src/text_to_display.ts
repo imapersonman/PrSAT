@@ -2,7 +2,7 @@ import { Editable, rEditable } from './editable';
 import { el, math_el, tel } from "./el";
 import { assert, assert_exists, fallthrough, sleep } from "./utils";
 import { parse_constraint, parse_constraint_or_real_expr } from "./parser";
-import { letter_string, TruthTable, variables_in_constraints } from "./pr_sat";
+import { constraint_to_string, letter_string, TruthTable, variables_in_constraints } from "./pr_sat";
 import { FancyEvaluatorOutput, init_z3, ModelAssignmentOutput, pr_sat_wrapped, PrSATResult, WrappedSolver, WrappedSolverResult } from "./z3_integration";
 import { s_to_string } from "./s";
 import { ConstraintOrRealExpr, PrSat } from "./types";
@@ -14,6 +14,7 @@ import * as TestId from '../tests/test_ids'
 import * as Constants from './constants'
 
 import './style.css'
+import { download } from './download';
 
 const root = assert_exists(document.getElementById('app'), 'Root element with id \'#app\' doesn\'t exist!')
 
@@ -1122,7 +1123,7 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
     left_side,
     right_side,
   )
-  const constraints_view = el('div', {})
+  const constraints_view = el('div', { style: 'margin-top: 0.4em;' })
 
   const generate_button = tel(TestId.find_model, 'input', { type: 'button', value: Constants.FIND_MODEL_BUTTON_LABEL, class: 'generate' }) as HTMLButtonElement
   const cancel_button = tel(TestId.cancel_id, 'input', { type: 'button', value: Constants.CANCEL_BUTTON_LABEL, style: 'margin-top: 0.4em;' }) as HTMLButtonElement
@@ -1369,7 +1370,18 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
       // }
 
       constraints_view.innerHTML = ''
-      // for (const constraint of all_constraints) {
+
+      const save_translated_constraints_button = el('input', { type: 'button', value: 'Save translated constraints' })
+      save_translated_constraints_button.onclick = () =>
+        download(result.constraints.translated.map(constraint_to_string).join('\n'), 'translated.txt', 'text/plain')
+
+      const save_smtlib_button = el('input', { type: 'button', value: 'Save SMTLIB input', style: 'margin-left: 0.4em;' })
+      save_smtlib_button.onclick = () =>
+        download(result.smtlib_input, 'smtlib.txt', 'text/plain')
+
+      const result_save_button_bar = el('span', {}, save_translated_constraints_button, save_smtlib_button)
+      constraints_view.appendChild(result_save_button_bar)
+
       for (const constraint of result.constraints.translated) {
         const e = constraint_to_html(constraint, true)
         constraints_view.appendChild(el('div', { style: 'margin-top: 0.4em;' }, e))
