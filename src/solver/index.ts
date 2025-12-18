@@ -14,16 +14,16 @@ export const new_promise = <T>(name: string, f: (resolve: (value: PromiseLike<T>
   const p = new Promise<T>((resolve, reject) => {
     f((i) => {
       promises_map.delete(name)
-      console.log('resolved', name, 'left', promises_map.size)
+      // console.log('resolved', name, 'left', promises_map.size)
       resolve(i)
     }, (i) => {
       promises_map.delete(name)
-      console.log('rejected', name, 'left', promises_map.size)
+      // console.log('rejected', name, 'left', promises_map.size)
       reject(i)
     })
   })
   promises_map.set(name, p)
-  console.log('started', name, 'left', promises_map.size)
+  // console.log('started', name, 'left', promises_map.size)
   return p
 }
 
@@ -179,6 +179,7 @@ export class SolverStateMachine {
     deinitializing: new Set(['uninitialized']),
     solving: new Set(['cancelling', 'finished']),
     staged: new Set(['solving', 'invalidated']),
+    // cancelling: new Set(['finished', 'deinitializing']),
     cancelling: new Set(['finished', 'deinitializing']),
     finished: new Set(['invalidated']),
     invalidated: new Set(['staged', 'deinitializing']),

@@ -327,7 +327,7 @@ export const real_expr_builder = {
   divide: (numerator: RealExpr, denominator: RealExpr, denominator_is_probability: boolean = false): RealExprMap['divide'] => ({ tag: 'divide', numerator, denominator }),
   power: (base: RealExpr, exponent: RealExpr): RealExprMap['power'] => ({ tag: 'power', base, exponent }),
 }
-const { svs, lit, minus, plus } = real_expr_builder
+const { svs, lit, minus, plus, pr } = real_expr_builder
 // const { state_variable_sum: svs, literal: lit } = PrSatFuncs.inits.RealExpr
 
 export const constraint_builder = {
@@ -1080,6 +1080,8 @@ const div0_conditions_in_prsat_ast = (ast: PrSATAst): Constraint[] => {
         if (e.denominator.tag !== 'literal' || e.denominator.value === 0) {
           cs.push(cnot(eq(e.denominator, lit(0))))
         }
+      } else if (e.tag === 'given_probability') {
+        cs.push(cnot(eq(pr(e.given), lit(0))))
       }
     },
   })
@@ -1138,7 +1140,7 @@ export const div0_conditions_in_real_expr = (expr: RealExpr): Constraint[] => {
   } else if (expr.tag === 'probability') {
     return []
   } else if (expr.tag === 'given_probability') {
-    return []
+    return [cnot(eq(pr(expr.given), lit(0)))]
   } else if (expr.tag === 'state_variable_sum') {
     return []
   } else if (expr.tag === 'negative') {
