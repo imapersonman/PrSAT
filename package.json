@@ -7,6 +7,7 @@
     "dev": "vite",
     "copy-files": "cp node_modules/z3-solver/build/z3-built.js node_modules/z3-solver/build/z3-built.wasm public",
     "build": "tsc && vite build",
+    "build-lax": "vite build",
     "preview": "vite preview",
     "test": "vitest --allowOnly --run && npx playwright test --project chromium --project firefox",
     "test-single": "vitest --allowOnly"
