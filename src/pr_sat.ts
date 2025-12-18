@@ -1,12 +1,303 @@
 import { Random } from "./random"
-import { assert, assert_exists, fallthrough, include_exclude_set, Res } from "./utils"
+import { are_equal, assert, assert_exists, fallthrough, include_exclude_set, Res } from "./utils"
 
 type Sentence = PrSat['Sentence']
 type RealExpr = PrSat['RealExpr']
 type Constraint = PrSat['Constraint']
 
+type PrSATAst =
+  | { tag: 'sentence', sentence: Sentence }
+  | ConstraintOrRealExpr
+
 export const letter_string = (l: SentenceMap['letter']): string =>
   `${l.id}${l.index > 0 ? l.index : ''}`
+
+type PrSATAstMapper<S, R, C> = {
+  Sentence?: (s: Sentence) => S,
+  RealExpr?: (e: RealExpr) => R,
+  Constraint?: (c: Constraint) => C,
+}
+
+// const transform_constraints_from_transforms = (transforms: PrSATAstMapper<Sentence, RealExpr, Constraint>[]) => (constraints: Constraint[]) => {
+// }
+
+const visit_prsat_ast = (
+  ast: PrSATAst,
+  visitor: PrSATAstMapper<void, void, void>,
+) => {
+  if (ast.tag === 'sentence') {
+    if (visitor.Sentence) {
+      visit_sentence(ast.sentence, visitor.Sentence)
+    }
+  } else if (ast.tag === 'real_expr') {
+    return visit_real_expr(ast.real_expr, visitor.RealExpr, visitor.Sentence)
+  } else if (ast.tag === 'constraint') {
+    return visit_constraint(ast.constraint, visitor)
+  } else {
+    return fallthrough('visit_prsat_ast', ast)
+  }
+}
+
+const visit_sentence = (s: Sentence, visit?: (s: Sentence) => void): void => {
+  const sub = (s: Sentence) => visit_sentence(s, visit)
+  const inner = (s: Sentence): void => {
+    if (s.tag === 'negation') {
+      sub(s.sentence)
+    } else if (s.tag === 'disjunction') {
+      sub(s.left)
+      sub(s.right)
+    } else if (s.tag === 'conjunction') {
+      sub(s.left)
+      sub(s.right)
+    } else if (s.tag === 'conditional') {
+      sub(s.left)
+      sub(s.right)
+    } else if (s.tag === 'biconditional') {
+      sub(s.left)
+      sub(s.right)
+    } else {
+      assert(s.tag === 'value' || s.tag === 'letter')
+    }
+  }
+
+  if (visit !== undefined) {
+    inner(s)
+    visit(s)
+  }
+}
+
+const visit_real_expr = (r: RealExpr, vre?: (r: RealExpr) => void, vs?: (c: Sentence) => void): void => {
+  // I'm just going to fix the order to the same one used by the map stuff.
+  // Depth first post order.
+  const subs = (s: Sentence): void => { if (vs !== undefined) visit_sentence(s, vs) }
+  const sub = (r: RealExpr): void => { if (vre !== undefined) visit_real_expr(r, vre, vs) }
+  const inner = (r: RealExpr): void => {
+    if (r.tag === 'probability') {
+      subs(r.arg)
+    } else if (r.tag === 'given_probability') {
+      subs(r.arg)
+      subs(r.given)
+    } else if (r.tag === 'negative') {
+      sub(r.expr)
+    } else if (r.tag === 'power') {
+      sub(r.base)
+      sub(r.exponent)
+    } else if (r.tag === 'plus') {
+      sub(r.left)
+      sub(r.right)
+    } else if (r.tag === 'minus') {
+      sub(r.left)
+      sub(r.right)
+    } else if (r.tag === 'multiply') {
+      sub(r.left)
+      sub(r.right)
+    } else if (r.tag === 'divide') {
+      sub(r.numerator)
+      sub(r.denominator)
+    } else {
+      assert(r.tag === 'literal' || r.tag === 'variable' || r.tag === 'state_variable_sum')
+    }
+  }
+
+  if (vre !== undefined || vs !== undefined) {
+    inner(r)
+    vre?.(r)
+  }
+}
+
+export const visit_constraint = (c: Constraint, visit: PrSATAstMapper<void, void, void>): void => {
+  const subr = (r: RealExpr): void => visit_real_expr(r, visit.RealExpr, visit.Sentence)
+  const sub = (c: Constraint): void => visit_constraint(c, visit)
+
+  const inner = (c: Constraint): void => {
+    if (c.tag === 'negation') {
+      sub(c.constraint)
+    } else if (c.tag === 'equal') {
+      subr(c.left)
+      subr(c.right)
+    } else if (c.tag === 'not_equal') {
+      subr(c.left)
+      subr(c.right)
+    } else if (c.tag === 'less_than') {
+      subr(c.left)
+      subr(c.right)
+    } else if (c.tag === 'less_than_or_equal') {
+      subr(c.left)
+      subr(c.right)
+    } else if (c.tag === 'greater_than') {
+      subr(c.left)
+      subr(c.right)
+    } else if (c.tag === 'greater_than_or_equal') {
+      subr(c.left)
+      subr(c.right)
+    } else if (c.tag === 'disjunction') {
+      sub(c.left)
+      sub(c.right)
+    } else if (c.tag === 'conjunction') {
+      sub(c.left)
+      sub(c.right)
+    } else if (c.tag === 'conditional') {
+      sub(c.left)
+      sub(c.right)
+    } else if (c.tag === 'biconditional') {
+      sub(c.left)
+      sub(c.right)
+    } else {
+      fallthrough('visit_constraint', c)
+    }
+  }
+
+  if (visit.Sentence !== undefined || visit.RealExpr !== undefined || visit.Constraint !== undefined) {
+    inner(c)
+    visit.Constraint?.(c)
+  }
+}
+
+const map_prsat_ast = (
+  ast: PrSATAst,
+  mapper: PrSATAstMapper<Sentence, RealExpr, Constraint>,
+) => {
+  if (ast.tag === 'sentence') {
+    return map_sentence(ast.sentence, mapper.Sentence ?? (s => s))
+  } else if (ast.tag === 'real_expr') {
+    return map_real_expr(ast.real_expr, mapper.RealExpr ?? (r => r), mapper.Sentence ?? (s => s))
+  } else if (ast.tag === 'constraint') {
+    return map_constraint(ast.constraint, mapper)
+  } else {
+    return fallthrough('map_prsat_ast', ast)
+  }
+}
+
+const map_sentence = (s: Sentence, mapper: (s: Sentence) => Sentence): Sentence => {
+  const sub = (s: Sentence) => mapper(inner(s))
+  const inner = (s: Sentence): Sentence => {
+    if (s.tag === 'negation') {
+      const sentence = sub(s.sentence)
+      return { tag: 'negation', sentence }
+    } else if (s.tag === 'disjunction') {
+      const left = sub(s.left)
+      const right = sub(s.right)
+      return { tag: 'disjunction', left, right }
+    } else if (s.tag === 'conjunction') {
+      const left = sub(s.left)
+      const right = sub(s.right)
+      return { tag: 'conjunction', left, right }
+    } else if (s.tag === 'conditional') {
+      const left = sub(s.left)
+      const right = sub(s.right)
+      return { tag: 'conditional', left, right }
+    } else if (s.tag === 'biconditional') {
+      const left = sub(s.left)
+      const right = sub(s.right)
+      return { tag: 'biconditional', left, right }
+    } else {
+      assert(s.tag === 'value' || s.tag === 'letter')
+      return s
+    }
+  }
+
+  // We want the mapper to transfer the root if it wants, preferably after the children have been transformed.
+  return sub(s)
+}
+
+const map_real_expr = (e: RealExpr, real_expr_mapper: (e: RealExpr) => RealExpr, sentence_mapper: (s: Sentence) => Sentence): RealExpr => {
+  const sub = (e: RealExpr): RealExpr => real_expr_mapper(inner(e))
+  const subs = (s: Sentence): Sentence => map_sentence(s, sentence_mapper)
+  const inner = (e: RealExpr): RealExpr => {
+    if (e.tag === 'negative') {
+      const expr = sub(e.expr)
+      return { tag: 'negative', expr }
+    } else if (e.tag === 'probability') {
+      const arg = subs(e.arg)
+      return { tag: 'probability', arg }
+    } else if (e.tag === 'given_probability') {
+      const arg = subs(e.arg)
+      const given = subs(e.given)
+      return { tag: 'given_probability', arg, given }
+    } else if (e.tag === 'power') {
+      const base = sub(e.base)
+      const exponent = sub(e.exponent)
+      return { tag: 'power', base, exponent }
+    } else if (e.tag === 'plus') {
+      const left = sub(e.left)
+      const right = sub(e.right)
+      return { tag: 'plus', left, right }
+    } else if (e.tag === 'minus') {
+      const left = sub(e.left)
+      const right = sub(e.right)
+      return { tag: 'minus', left, right }
+    } else if (e.tag === 'multiply') {
+      const left = sub(e.left)
+      const right = sub(e.right)
+      return { tag: 'multiply', left, right }
+    } else if (e.tag === 'divide') {
+      const numerator = sub(e.numerator)
+      const denominator = sub(e.denominator)
+      return { tag: 'divide', numerator, denominator }
+    } else {
+      assert(e.tag === 'literal' || e.tag === 'variable' || e.tag === 'state_variable_sum')
+      return e
+    }
+  }
+
+  return sub(e)
+}
+
+export const map_constraint = (c: Constraint, mapper: PrSATAstMapper<Sentence, RealExpr, Constraint>): Constraint => {
+  const sube = (e: RealExpr): RealExpr => map_real_expr(e, mapper.RealExpr ?? (r => r), mapper.Sentence ?? (s => s))
+  const sub = (c: Constraint): Constraint => (mapper.Constraint ?? (c => c))(inner(c))
+
+  const inner = (c: Constraint): Constraint => {
+    if (c.tag === 'negation') {
+      const constraint = sub(c.constraint)
+      return { tag: 'negation', constraint }
+    } else if (c.tag === 'equal') {
+      const left = sube(c.left)
+      const right = sube(c.right)
+      return { tag: 'equal', left, right }
+    } else if (c.tag === 'not_equal') {
+      const left = sube(c.left)
+      const right = sube(c.right)
+      return { tag: 'not_equal', left, right }
+    } else if (c.tag === 'less_than') {
+      const left = sube(c.left)
+      const right = sube(c.right)
+      return { tag: 'less_than', left, right }
+    } else if (c.tag === 'less_than_or_equal') {
+      const left = sube(c.left)
+      const right = sube(c.right)
+      return { tag: 'less_than_or_equal', left, right }
+    } else if (c.tag === 'greater_than') {
+      const left = sube(c.left)
+      const right = sube(c.right)
+      return { tag: 'greater_than', left, right }
+    } else if (c.tag === 'greater_than_or_equal') {
+      const left = sube(c.left)
+      const right = sube(c.right)
+      return { tag: 'greater_than_or_equal', left, right }
+    } else if (c.tag === 'disjunction') {
+      const left = sub(c.left)
+      const right = sub(c.right)
+      return { tag: 'disjunction', left, right }
+    } else if (c.tag === 'conjunction') {
+      const left = sub(c.left)
+      const right = sub(c.right)
+      return { tag: 'conjunction', left, right }
+    } else if (c.tag === 'conditional') {
+      const left = sub(c.left)
+      const right = sub(c.right)
+      return { tag: 'conditional', left, right }
+    } else if (c.tag === 'biconditional') {
+      const left = sub(c.left)
+      const right = sub(c.right)
+      return { tag: 'biconditional', left, right }
+    } else {
+      return fallthrough('map_constraint', c)
+    }
+  }
+
+  return sub(c)
+}
 
 export const sentence_builder = {
   val: (v: boolean): Sentence => ({ tag: 'value', value: v }),
@@ -33,7 +324,7 @@ export const real_expr_builder = {
   plus: (left: RealExpr, right: RealExpr): RealExprMap['plus'] => ({ tag: 'plus', left, right }),
   minus: (left: RealExpr, right: RealExpr): RealExprMap['minus'] => ({ tag: 'minus', left, right }),
   multiply: (left: RealExpr, right: RealExpr): RealExprMap['multiply'] => ({ tag: 'multiply', left, right }),
-  divide: (numerator: RealExpr, denominator: RealExpr): RealExprMap['divide'] => ({ tag: 'divide', numerator, denominator }),
+  divide: (numerator: RealExpr, denominator: RealExpr, denominator_is_probability: boolean = false): RealExprMap['divide'] => ({ tag: 'divide', numerator, denominator }),
   power: (base: RealExpr, exponent: RealExpr): RealExprMap['power'] => ({ tag: 'power', base, exponent }),
 }
 const { svs, lit, minus, plus } = real_expr_builder
@@ -427,7 +718,8 @@ export const evaluate_sentence = (eval_letter: (l: SentenceMap['letter']) => boo
   return evaluate(sentence)
 }
 
-const probability_constraints = (tt: TruthTable, eliminated_index: number | undefined, regular: boolean): Constraint[] => {
+// Eliminating the index here is very gross and I don't like it very much at all!
+export const probability_constraints = (tt: TruthTable, eliminated_index: number | undefined, regular: boolean): Constraint[] => {
   const sis = [...tt.state_indices()].filter((si) => si !== eliminated_index)
   const zero_c = regular ? gt : gte
   const cs = sis.map((si) => zero_c(svs([si]), lit(0)))
@@ -437,10 +729,50 @@ const probability_constraints = (tt: TruthTable, eliminated_index: number | unde
   return cs
 }
 
-export type VariableLists = { real: string[], sentence: SentenceMap['letter'][] }
+export type VariableLists = {
+  real: string[]
+  sentence: SentenceMap['letter'][]
+}
+
+const compare = <R>(f1: () => R, f2: () => R): R => {
+  const f1_result = f1()
+  const f2_result = f2()
+
+  if (!are_equal(f1_result, f2_result)) {
+    throw new Error('Functions do not result in the same thing!')
+  }
+
+  return f1_result
+}
+
+const letters_in_constraint = (constraint: Constraint, letters: VariableLists = { real: [], sentence: [] }) => {
+  const letters_copy = JSON.parse(JSON.stringify(letters)) as VariableLists  // gross but I don't want to deal.
+  return compare(
+    () => letters_in_constraint_new(constraint, letters),
+    () => letters_in_constraint_old(constraint, letters_copy),
+  )
+}
+
+const letters_in_constraint_new = (constraint: Constraint, letters: VariableLists = { real: [], sentence: [] }): VariableLists => {
+  const vls = letters
+  visit_constraint(constraint, {
+    Sentence: (s) => {
+      if (s.tag === 'letter') {
+        vls.sentence.push(s)
+      }
+    },
+    RealExpr: (e) => {
+      if (e.tag === 'variable') {
+        vls.real.push(e.id)
+      }
+    },
+    Constraint: () => {},
+  })
+  return vls
+}
 
 // Will modify letters array.
-const letters_in_constraint = (constraint: Constraint, letters: VariableLists = { real: [], sentence: [] }): VariableLists => {
+const letters_in_constraint_old = (constraint: Constraint, letters: VariableLists = { real: [], sentence: [] }): VariableLists => {
   if (constraint.tag === 'equal') {
     const ll = letters_in_real_expr(constraint.left, letters)
     return letters_in_real_expr(constraint.right, ll)
@@ -526,6 +858,8 @@ export const variables_in_constraints = (constraints: Constraint[]): VariableLis
   return variables
 }
 
+// The denom_has_probability_map is a hack and I don't like it.
+// It's mutated.
 export const translate = (tt: TruthTable, constraints: Constraint[]): Constraint[] => {
   const translated: Constraint[] = []
 
@@ -730,8 +1064,30 @@ export const sentence_to_random_string = (random: Random, s: Sentence): string =
 // type S =
 //   | string
 //   | S[]
-
 export const div0_conditions_in_constraint_or_real_expr = (c_or_re: ConstraintOrRealExpr): Constraint[] => {
+  return compare(
+    () => div0_conditions_in_prsat_ast(c_or_re),
+    () => div0_conditions_in_constraint_or_real_expr_old(c_or_re),
+  )
+}
+
+const div0_conditions_in_prsat_ast = (ast: PrSATAst): Constraint[] => {
+  const cs: Constraint[] = []
+
+  visit_prsat_ast(ast, {
+    RealExpr: (e) => {
+      if (e.tag === 'divide') {
+        if (e.denominator.tag !== 'literal' || e.denominator.value === 0) {
+          cs.push(cnot(eq(e.denominator, lit(0))))
+        }
+      }
+    },
+  })
+
+  return cs
+}
+
+const div0_conditions_in_constraint_or_real_expr_old = (c_or_re: ConstraintOrRealExpr): Constraint[] => {
   if (c_or_re.tag === 'constraint') {
     return div0_conditions_in_single_constraint(c_or_re.constraint)
   } else if (c_or_re.tag === 'real_expr') {
@@ -740,6 +1096,10 @@ export const div0_conditions_in_constraint_or_real_expr = (c_or_re: ConstraintOr
     return fallthrough('div0_conditions_in_constraint_or_real_expr', c_or_re)
   }
 }
+
+/*
+(assert (not (= (/ s_0 (+ s_0 s_2)) (/ (* (/ s_0 (+ s_0 s_1)) (+ s_0 s_1)) (+ s_0 s_2)))))
+*/
 
 export const div0_conditions_in_single_constraint = (c: Constraint): Constraint[] => {
   if (c.tag === 'equal') {
@@ -792,11 +1152,19 @@ export const div0_conditions_in_real_expr = (expr: RealExpr): Constraint[] => {
   } else if (expr.tag === 'multiply') {
     return [...div0_conditions_in_real_expr(expr.left), ...div0_conditions_in_real_expr(expr.right)]
   } else if (expr.tag === 'divide') {
-    return [
-      ...(expr.denominator.tag !== 'literal' || expr.denominator.value === 0 ? [cnot(eq(expr.denominator, lit(0)))] : []),
-      ...div0_conditions_in_real_expr(expr.numerator),
-      ...div0_conditions_in_real_expr(expr.denominator),
-    ]
+    // if (expr.denominator_is_probability) {
+    //   return [
+    //     ...(expr.denominator.tag !== 'literal' || expr.denominator.value === 0 ? [gt(expr.denominator, lit(0))] : []),
+    //     ...div0_conditions_in_real_expr(expr.numerator),
+    //     ...div0_conditions_in_real_expr(expr.denominator),
+    //   ]
+    // } else {
+      return [
+        ...div0_conditions_in_real_expr(expr.numerator),
+        ...div0_conditions_in_real_expr(expr.denominator),
+        ...(expr.denominator.tag !== 'literal' || expr.denominator.value === 0 ? [cnot(eq(expr.denominator, lit(0)))] : []),
+      ]
+    // }
   } else {
     throw new Error('div0_condition_in_real_expr fallthrough')
   }
@@ -848,7 +1216,7 @@ export const eliminate_state_variable_index_in_svs = (index: number, inverted_re
 const eliminate_state_variable_index_in_real_expr = (index: number, inverted_redef: RealExprMap['state_variable_sum'], e: RealExpr): RealExpr => {
   const sub = (e: RealExpr): RealExpr => eliminate_state_variable_index_in_real_expr(index, inverted_redef, e)
   if (e.tag === 'divide') {
-    return { tag: 'divide', numerator: sub(e.numerator), denominator: sub(e.denominator) }
+    return { tag: 'divide', numerator: sub(e.numerator), denominator: sub(e.denominator)/*, denominator_is_probability: e.denominator_is_probability*/ }
   } else if (e.tag === 'given_probability') {
     return e
   } else if (e.tag === 'literal') {
@@ -877,7 +1245,26 @@ const eliminate_state_variable_index_in_real_expr = (index: number, inverted_red
 }
 
 const eliminate_state_variable_index_in_constraint = (index: number, inverted_redef: RealExprMap['state_variable_sum'], c: Constraint): Constraint => {
-  const sub = (c: Constraint): Constraint => eliminate_state_variable_index_in_constraint(index, inverted_redef, c)
+  return compare(
+    () => eliminate_state_variable_index_in_constraint_new(index, inverted_redef, c),
+    () => eliminate_state_variable_index_in_constraint_old(index, inverted_redef, c),
+  )
+}
+
+const eliminate_state_variable_index_in_constraint_new = (index: number, inverted_redef: RealExprMap['state_variable_sum'], c: Constraint): Constraint => {
+  return map_constraint(c, {
+    RealExpr: (e) => {
+      if (e.tag === 'state_variable_sum') {
+        return eliminate_state_variable_index_in_svs(index, inverted_redef, e)
+      } else {
+        return e
+      }
+    }
+  })
+}
+
+const eliminate_state_variable_index_in_constraint_old = (index: number, inverted_redef: RealExprMap['state_variable_sum'], c: Constraint): Constraint => {
+  const sub = (c: Constraint): Constraint => eliminate_state_variable_index_in_constraint_old(index, inverted_redef, c)
   const re = (e: RealExpr): RealExpr => eliminate_state_variable_index_in_real_expr(index, inverted_redef, e)
   if (c.tag === 'biconditional') {
     return { tag: 'biconditional', left: sub(c.left), right: sub(c.right) }
@@ -916,6 +1303,7 @@ export const eliminate_state_variable_index = (n_states: number, index: number, 
   const inverted_redef = compute_inverted_redef(n_states, index)
   const new_constraints = constraints.map((c) => eliminate_state_variable_index_in_constraint(index, inverted_redef, c))
   const redef = minus(lit(1), inverted_redef)
+  // new_constraints.push(eq(svs([index]), redef))
   const final_constraints = [
     ...new_constraints,
     // eq(svs([index]), redef),
@@ -937,7 +1325,12 @@ export const eliminate_state_variable_index_in_constraint_or_real_expr = (n_stat
 
 // Adds probability and division by zero constraints.
 
-export const enrich_constraints = (tt: TruthTable, index_to_eliminate: number | undefined, regular: boolean, constraints: Constraint[]): Constraint[] => {
+export const enrich_constraints = (
+  tt: TruthTable,
+  index_to_eliminate: number | undefined,
+  regular: boolean,
+  constraints: Constraint[],
+): Constraint[] => {
   return [
     ...probability_constraints(tt, index_to_eliminate, regular),
     ...find_div0_conditions_in_constraints(constraints),
@@ -945,7 +1338,7 @@ export const enrich_constraints = (tt: TruthTable, index_to_eliminate: number | 
   ]
 }
 
-const translate_constraints_to_smtlib = (tt: TruthTable, index_to_eliminate: number, constraints: Constraint[]): S[] => {
+const translate_constraints_to_smtlib = (tt: TruthTable, index_to_eliminate: number | undefined, constraints: Constraint[]): S[] => {
   const smtlib_lines: S[] = []
   smtlib_lines.push(['set-logic', 'QF_NRA'])
 
@@ -973,51 +1366,6 @@ const translate_constraints_to_smtlib = (tt: TruthTable, index_to_eliminate: num
 
   return smtlib_lines
 }
-
-/*
-(declare-const s_0 Real)
-(declare-const s_1 Real)
-(declare-const s_2 Real)
-(declare-const s_3 Real)
-(assert (>= s_0 0))
-(assert (>= s_1 0))
-(assert (>= s_2 0))
-(assert (>= s_3 0))
-(assert (= (+ s_0 s_1 s_2 s_3) 1))
-(assert (< 1 (/ 1 2)))
-(assert (> (/ s_0 1) (/ 1 2)))
-(assert (> (/ s_0 1) (/ 1 2)))
-(assert (not (< (/ s_1 1) 1)))
-(check-sat)
-(get-model)
-
-(declare-const s_0 Real)
-(declare-const s_1 Real)
-(declare-const s_2 Real)
-(declare-const s_3 Real)
-(assert (>= s_0 0))
-(assert (>= s_1 0))
-(assert (>= s_2 0))
-(assert (>= s_3 0))
-(assert (= (+ s_0 s_1 s_2 s_3) 1))
-(assert (not (= (+ s_0 s_2) 0)))
-(assert (not (= (+ s_0 s_1) 0)))
-(assert (not (= (+ s_1 s_3) 0)))
-(assert (< (+ s_0 s_1) (/ 1 2)))
-(assert (> (/ s_0 (+ s_0 s_2)) (/ 1 2)))
-(assert (> (/ s_0 (+ s_0 s_1)) (/ 1 2)))
-(assert (not (< (/ s_1 (+ s_1 s_3)) (+ s_0 s_2))))
-(check-sat)
-(get-model)
-*/
-
-// const s_to_string = (s: S): string => {
-//   if (typeof s === 'string') {
-//     return s
-//   } else {
-//     return `(${s.map(s_to_string).join(' ')})`
-//   }
-// }
 
 import P from 'parsimmon'
 import { ConstraintOrRealExpr, PrSat, RealExprMap, SentenceMap } from "./types"
@@ -1055,7 +1403,7 @@ export const parse_s = (str: string): S => {
   return s_lang.s.tryParse(str)
 }
 
-export const constraints_to_smtlib_lines = (tt: TruthTable, index_to_eliminate: number, constraints: Constraint[]): S[] => {
+export const constraints_to_smtlib_lines = (tt: TruthTable, index_to_eliminate: number | undefined, constraints: Constraint[]): S[] => {
   const smtlib_lines = translate_constraints_to_smtlib(tt, index_to_eliminate, constraints)
   return smtlib_lines
 }
@@ -1071,6 +1419,34 @@ export const translate_constraint_or_real_expr = (tt: TruthTable, c_or_re: Const
 }
 
 export const translate_constraint = (tt: TruthTable, constraint: Constraint): Constraint => {
+  return compare(
+    () => translate_constraint_new(tt, constraint),
+    () => translate_constraint_old(tt, constraint),
+  )
+}
+
+const translate_constraint_new = (tt: TruthTable, constraint: Constraint): Constraint => {
+  return map_constraint(constraint, {
+    RealExpr: (r) => {
+      if (r.tag === 'probability') {
+        const arg_dnf = tt.compute_dnf(r.arg)
+        return translate_dnf_to_real_expr(tt, arg_dnf)
+      } else if (r.tag === 'given_probability') {
+        const num_dnf = tt.compute_dnf({ tag: 'conjunction', left: r.arg, right: r.given })
+        const den_dnf = tt.compute_dnf(r.given)
+        return {
+          tag: 'divide',
+          numerator: translate_dnf_to_real_expr(tt, num_dnf),
+          denominator: translate_dnf_to_real_expr(tt, den_dnf),
+        }
+      } else {
+        return r
+      }
+    },
+  })
+}
+
+const translate_constraint_old = (tt: TruthTable, constraint: Constraint): Constraint => {
   if (constraint.tag === 'equal') {
     const tl = translate_real_expr(tt, constraint.left)
     const tr = translate_real_expr(tt, constraint.right)
@@ -1096,23 +1472,23 @@ export const translate_constraint = (tt: TruthTable, constraint: Constraint): Co
     const tr = translate_real_expr(tt, constraint.right)
     return { tag: 'greater_than_or_equal', left: tl, right: tr }
   } else if (constraint.tag === 'negation') {
-    const tc = translate_constraint(tt, constraint.constraint)
+    const tc = translate_constraint_old(tt, constraint.constraint)
     return { tag: 'negation', constraint: tc }
   } else if (constraint.tag === 'conjunction') {
-    const tl = translate_constraint(tt, constraint.left)
-    const tr = translate_constraint(tt, constraint.right)
+    const tl = translate_constraint_old(tt, constraint.left)
+    const tr = translate_constraint_old(tt, constraint.right)
     return { tag: 'conjunction', left: tl, right: tr }
   } else if (constraint.tag === 'disjunction') {
-    const tl = translate_constraint(tt, constraint.left)
-    const tr = translate_constraint(tt, constraint.right)
+    const tl = translate_constraint_old(tt, constraint.left)
+    const tr = translate_constraint_old(tt, constraint.right)
     return { tag: 'disjunction', left: tl, right: tr }
   } else if (constraint.tag === 'conditional')  {
-    const tl = translate_constraint(tt, constraint.left)
-    const tr = translate_constraint(tt, constraint.right)
+    const tl = translate_constraint_old(tt, constraint.left)
+    const tr = translate_constraint_old(tt, constraint.right)
     return { tag: 'conditional', left: tl, right: tr }
   } else if (constraint.tag === 'biconditional') {
-    const tl = translate_constraint(tt, constraint.left)
-    const tr = translate_constraint(tt, constraint.right)
+    const tl = translate_constraint_old(tt, constraint.left)
+    const tr = translate_constraint_old(tt, constraint.right)
     return { tag: 'biconditional', left: tl, right: tr }
   } else {
     throw new Error('translate_constraint fallthrough')
@@ -1163,6 +1539,7 @@ export const translate_real_expr = (tt: TruthTable, expr: RealExpr): RealExpr =>
       tag: 'divide',
       numerator: translate_dnf_to_real_expr(tt, num_dnf),
       denominator: translate_dnf_to_real_expr(tt, den_dnf),
+      // denominator_is_probability: true,  // denominator is always a probability!
     }
   } else if (expr.tag === 'plus') {
     const tl = translate_real_expr(tt, expr.left)
@@ -1179,7 +1556,12 @@ export const translate_real_expr = (tt: TruthTable, expr: RealExpr): RealExpr =>
   } else if (expr.tag === 'divide') {
     const tn = translate_real_expr(tt, expr.numerator)
     const td = translate_real_expr(tt, expr.denominator)
-    return { tag: 'divide', numerator: tn, denominator: td }
+    return {
+      tag: 'divide',
+      numerator: tn,
+      denominator: td,
+      // denominator_is_probability: expr.denominator.tag === 'probability' || expr.denominator.tag === 'given_probability',
+    }
   } else if (expr.tag === 'power') {
     const tb = translate_real_expr(tt, expr.base)
     const te = translate_real_expr(tt, expr.exponent)
@@ -1446,7 +1828,7 @@ export class RealExprFuzzer {
       plus: { arity: 2, construct: ([left, right]) => ({ tag: 'plus', left: ae(left), right: ae(right) }) },
       minus: { arity: 2, construct: ([left, right]) => ({ tag: 'minus', left: ae(left), right: ae(right) }) },
       multiply: { arity: 2, construct: ([left, right]) => ({ tag: 'multiply', left: ae(left), right: ae(right) }) },
-      divide: { arity: 2, construct: ([n, d]) => ({ tag: 'divide', numerator: ae(n), denominator: ae(d) }) },
+      divide: { arity: 2, construct: ([n, d]) => ({ tag: 'divide', numerator: ae(n), denominator: ae(d), denominator_is_probability: false }) },
       power: { arity: 1, construct: ([b]) => ({ tag: 'power', base: ae(b), exponent: lit(this.random.integer({ lower: 0, upper: 4 })) }) },
       // root: { arity: 1, construct: ([r]) => ({ tag: 'root', radicand: ae(r), root: this.random.integer() }) },
     }

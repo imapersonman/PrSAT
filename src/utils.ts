@@ -78,13 +78,57 @@ export const match_defined = <T, Return>(v: T | undefined, def: (v: T) => Return
 }
 
 // : <T>((e1: T, e2: T) => boolean), T, T, => boolean
-export const arrays_are_equal = <T>(elements_are_equal: (t1: T, t2: T) => boolean, arr1: T[], arr2: T[]) => {
+export const arrays_are_equal = <T>(elements_are_equal: (t1: T, t2: T) => boolean, arr1: T[], arr2: T[]): boolean => {
   if (arr1.length !== arr2.length)
     return false
   for (const [index, e1] of arr1.entries())
     if (!elements_are_equal(e1, arr2[index]))
       return false
   return true
+}
+
+// It's too annoying to type this properly so let's just do the dumb thing.
+export const objects_are_equal = (u1: object, u2: object): boolean => {
+  // Causes a redundant check when called from are_equal but its fine.
+  if (u1 === u2) return true
+  if (u1 === null || u2 === null) {
+    return false
+  }
+
+  const entries1 = Object.entries(u1)
+  if (entries1.length !== Object.keys(u2).length) {
+    return false
+  }
+
+  for (const [key, value1] of Object.entries(u1)) {
+    if (!(key in u2)) {
+        return false
+    }
+    const value2 = (u2 as any)[key]
+    if (!are_equal(value1, value2)) {
+        return false
+    }
+  }
+
+  return true
+}
+
+// Does not detect loops.
+export const are_equal = (u1: unknown, u2: unknown): boolean => {
+  if (typeof u1 === 'object' && typeof u2 === 'object') {
+    if (u1 === u2) return true
+    if (u1 === null || u2 === null) {
+        return false
+    }
+
+    if (Array.isArray(u1) && Array.isArray(u2)) {
+      return arrays_are_equal(are_equal, u1, u2)
+    } else {
+      return objects_are_equal(u1, u2)
+    }
+  } else {
+    return u1 === u2
+  }
 }
 
 export const assert_exists = <T>(t?: T | null, msg?: string): T => {
@@ -152,6 +196,10 @@ export const narrow_include_exclude_set = (previous_set: Set<string>, include?: 
     }
 }
 
+export const record_keys_2 = <R extends Record<string | symbol | number, unknown>>(r: R): (keyof R & (string | symbol | number))[] => {
+  return Object.keys(r)
+}
+
 export const record_keys = <R extends Record<string, unknown>>(r: R): (keyof R & string)[] => {
   return Object.keys(r)
 }
@@ -213,4 +261,9 @@ export const sleep = async (timeout_ms: number, abort_signal?: AbortSignal): Pro
         }
         abort_signal?.addEventListener('abort', on_cancel)
     })
+}
+
+export type PromiseFuncs<T> = {
+    resolve: (value: T | PromiseLike<T>) => void
+    reject: (reason?: any) => void
 }

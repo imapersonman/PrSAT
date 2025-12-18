@@ -1,7 +1,8 @@
 import { describe, test, expect } from 'vitest'
-import { ModelAssignmentOutput, parse_to_assignment, poly_s, run_solve_cancel_logic } from './z3_integration'
+import { model_assignment_output_to_string, ModelAssignmentOutput, parse_to_assignment, poly_s, pr_sat_staged, WrappedSolver } from './z3_integration'
 import { S } from './s'
-import { sleep } from './utils'
+
+type Constraint = PrSat['Constraint']
 
 describe('parse_to_assignment', () => {
   describe('negative', () => {
@@ -107,94 +108,95 @@ describe('parse_to_assignment', () => {
   })
 })
 
-describe('WrappedSolver', () => {
-  describe('solve stuff', () => {
-    type R = 'finished' | 'cancelled' | 'slow-cancelled'
-    const test_cancel = async (
-      config: {
-        time_before_cancel_ms: number,
-        cancel_timeout_ms: number,
-        time_to_actually_cancel_ms: number,
-        ignore_abort: boolean,
-        fudge_ms: number,
-      },
-      expected_result: R,
-    ) => {
-      const on_run_timeout = config.time_before_cancel_ms * 200
-      const expected_cancel_time = config.time_before_cancel_ms +
-        (expected_result === 'slow-cancelled' ? config.cancel_timeout_ms : config.time_to_actually_cancel_ms)
-      const ac =  new AbortController
+import { init_z3, parse_smtlib2_expr } from './z3_integration'
+import { assert_result, map_record } from './utils'
+import { assert_parse_constraint, assert_parse_real_expr } from './parser'
+import { PrSat } from './types'
+import { TruthTable, variables_in_constraints } from './pr_sat'
 
-      const on_run = async (signal?: AbortSignal): Promise<R> => {
-        const inner_controller = new AbortController()
-        const inner_on_cancel = async () => {
-          // wait a bit before actually aborting.
-          await sleep(config.time_to_actually_cancel_ms)
-          if (!config.ignore_abort) {
-            inner_controller.abort()  // don't actually abort!
-          }
-        }
-        signal?.addEventListener('abort', inner_on_cancel)
-        await sleep(on_run_timeout, inner_controller.signal)
-        return 'finished'
-      }
-      const on_cancel = async (): Promise<R> => {
-        return 'cancelled'
-      }
-      const on_slow_cancel = async (): Promise<R> => {
-        return 'slow-cancelled'
-      }
+describe('parse and evaluate', () => {
+  test('sanity check', async () => {
+    const { Context } = await init_z3()
+    const ctx = Context('main')
+    const solver = new ctx.Solver()
 
-      const start = performance.now()
-      const [result] = await Promise.all([
-        run_solve_cancel_logic(on_run, on_cancel, on_slow_cancel, config.cancel_timeout_ms, ac.signal),
-        (async () => {
-          await sleep(config.time_before_cancel_ms)
-          ac.abort()
-        })(),
-      ])
-      expect(result).toEqual(expected_result)  // slow-cancelled because on_cancel clearly didn't work if on_run is still going.
-      const actual_time = performance.now() - start
+    const input = `
+  (set-logic QF_NRA)
+  (declare-const s_0 Real)
+  (declare-const s_1 Real)
+  (assert (= s_0 2))
+  (assert (= s_1 2.5))
+  (check-sat)`
 
-      expect(Math.abs(actual_time - expected_cancel_time)).toBeLessThan(config.fudge_ms)
+    solver.fromString(input)
+
+    const result = await solver.check()
+    expect(result).toEqual('sat')
+    const model = solver.model()
+    
+    const expr = assert_result(parse_smtlib2_expr(ctx, ['s_0', 's_1'], '(+ s_0 s_1)'))
+    expect(model.eval(expr).sexpr()).toEqual('(/ 9.0 2.0)')
+
+    const bool = assert_result(parse_smtlib2_expr(ctx, ['s_0', 's_1'], '(= s_0 s_1)'))
+    // console.log(ctx.isBool(bool))
+    // if (!ctx.isBool(bool)) {
+    //   throw new Error('not bool!')
+    // }
+    expect(model.eval(bool).sexpr()).toEqual('0')
+  })
+  test('evaluate from simpson\'t paradox', async () => {
+    const constraints: Constraint[] = [
+      assert_parse_constraint('Pr(X | Y & Z) > Pr(X | Z)'),
+      assert_parse_constraint('Pr(X | Y & -Z) > Pr(X | -Z)'),
+      assert_parse_constraint('Pr(X | Y) < Pr(X)'),
+      assert_parse_constraint('Pr(X) = 1/2'),
+      assert_parse_constraint('Pr(Y) = 1/2'),
+    ]
+    const tt = new TruthTable(variables_in_constraints(constraints))
+    const stage = pr_sat_staged(new WrappedSolver(await init_z3(), init_z3), tt, constraints)
+    const result = await stage.go()
+    if (result.status !== 'sat') {
+      throw new Error(`Expected sat but not sat!\nactual: ${result.status}\n${result.status === 'exception' ? `message: ${result.message}` : ''}`)
     }
 
-    test('cancel within cancel timeout', async () => {
-      await test_cancel({
-        time_before_cancel_ms: 10,
-        cancel_timeout_ms: 50,
-        time_to_actually_cancel_ms: 30,
-        fudge_ms: 20,
-        ignore_abort: false,
-      }, 'cancelled')
-    })
-    test('cancel after cancel timeout', async () => {
-      await test_cancel({
-        time_before_cancel_ms: 10,
-        cancel_timeout_ms: 50,
-        time_to_actually_cancel_ms: 60,
-        fudge_ms: 20,
-        ignore_abort: false,
-      }, 'slow-cancelled')
-    })
+    // console.log(map_record(result.state_assignments, (_, v) => model_assignment_output_to_string(v)))
 
-    test('cancel within cancel timeout, but solve ignores the signal', async () => {
-      await test_cancel({
-        time_before_cancel_ms: 10,
-        cancel_timeout_ms: 50,
-        time_to_actually_cancel_ms: 30,
-        fudge_ms: 20,
-        ignore_abort: true,
-      }, 'slow-cancelled')
-    })
-    test('cancel after cancel timeout, but solve ignores the signal', async () => {
-      await test_cancel({
-        time_before_cancel_ms: 10,
-        cancel_timeout_ms: 50,
-        time_to_actually_cancel_ms: 60,
-        fudge_ms: 20,
-        ignore_abort: true,
-      }, 'slow-cancelled')
-    })
+    // These checks should really be done after every call to stuff but its fine for now!
+    for (const c of constraints) {
+      const evald = await result.evaluate(tt, { tag: 'constraint', constraint: c })
+      expect(evald).toEqual({ tag: 'bool-result', result: true })
+    }
+  })
+
+  test('evaluate from all zeroes', async () => {
+    const constraints: Constraint[] = [
+      assert_parse_constraint('Pr(X & Y) = 0'),
+      assert_parse_constraint('Pr(X & -Y) = 0'),
+      assert_parse_constraint('Pr(-X & Y) = 0'),
+      assert_parse_constraint('Pr(-X & -Y) = 1'),
+    ]
+
+    const tt = new TruthTable(variables_in_constraints(constraints))
+    const stage = pr_sat_staged(new WrappedSolver(await init_z3(), init_z3), tt, constraints)
+    const result = await stage.go()
+    if (result.status !== 'sat') {
+      throw new Error(`Expected sat but not sat!\nactual: ${result.status}\n${result.status === 'exception' ? `message: ${result.message}` : ''}`)
+    }
+
+    // div0
+    const evald1 = await result.evaluate(tt, { tag: 'real_expr', real_expr: assert_parse_real_expr('1 / Pr(X & Y)') })
+    expect(evald1.tag).toEqual('div0')
+
+    // unknown sentence variables
+    const evald2 = await result.evaluate(tt, { tag: 'real_expr', real_expr: assert_parse_real_expr('Pr(W & Z)') })
+    expect(evald2).toEqual({ tag: 'undeclared-vars', variables: { real: [], sentence: [{ tag: 'letter', id: 'W', index: 0 }, { tag: 'letter', id: 'Z', index: 0 }] } })
+
+    // unknown real variables and sentence variables
+    const evald3 = await result.evaluate(tt, { tag: 'real_expr', real_expr: assert_parse_real_expr('a + b') })
+    expect(evald3).toEqual({ tag: 'undeclared-vars', variables: { real: ['a', 'b'], sentence: [] } })
+
+    // unknown real variables and sentence variables
+    const evald4 = await result.evaluate(tt, { tag: 'real_expr', real_expr: assert_parse_real_expr('(a + b) / Pr(W & Z)') })
+    expect(evald4).toEqual({ tag: 'undeclared-vars', variables: { real: ['a', 'b'], sentence: [{ tag: 'letter', id: 'W', index: 0 }, { tag: 'letter', id: 'Z', index: 0 }] } })
   })
 })

@@ -8,6 +8,7 @@ import { download } from "./download";
 import * as TestId from '../tests/test_ids'
 
 import './style.css'
+import { button } from "./frontends/common";
 
 // const root = assert_exists(document.getElementById('app'))
 
@@ -309,14 +310,6 @@ const batch_input_block = <ParseOutput extends {}>(
     set_disabled: (disabled) => {
       set_disabled_for_all_children(element, disabled)
     },
-  }
-}
-
-const button = (label: string, attrs: Record<string, string> = {}, test_id?: string): HTMLButtonElement => {
-  if (test_id === undefined) {
-    return el('input', { ...attrs, type: 'button', value: label }) as HTMLButtonElement
-  } else {
-    return tel(test_id, 'input', { ...attrs, type: 'button', value: label }) as HTMLButtonElement
   }
 }
 
