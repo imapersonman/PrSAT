@@ -353,9 +353,9 @@ export class SolverStateMachine {
     throw new Error(`Expected SolverState different from actual!\nexpected: one of ${tags.join(', ')}\nactual: ${s.tag}`)
   }
 
-  register_listener(listener: SolverStateListener): { unregister(): void } {
+  register_listener(listener: SolverStateListener): { unregister(): void, call(): void } {
     this.listeners.add(listener)
-    return { unregister: () => this.listeners.delete(listener) }
+    return { unregister: () => this.listeners.delete(listener), call: () => listener(this.state) }
   }
 }
 
