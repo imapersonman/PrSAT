@@ -20,7 +20,7 @@ type RealExpr =
   | { tag: 'plus', left: RealExpr, right: RealExpr }
   | { tag: 'minus', left: RealExpr, right: RealExpr }
   | { tag: 'multiply', left: RealExpr, right: RealExpr }
-  | { tag: 'divide', numerator: RealExpr, denominator: RealExpr }
+  | { tag: 'divide', numerator: RealExpr, denominator: RealExpr/*, denominator_is_probability: boolean*/ }
   | { tag: 'power', base: RealExpr, exponent: RealExpr }
 export type RealExprMap = UnionToTagMap<'tag', RealExpr>
 
@@ -213,7 +213,11 @@ export const PrSatFuncs = setup_mutual_map<PrSat>()({
       tag: "record",
       record: {
         numerator: "RealExpr",
-        denominator: "RealExpr"
+        denominator: "RealExpr",
+        // denominator_is_probability: {
+        //   tag: "primitive",
+        //   type: "boolean"
+        // }
       }
     },
     power: {
