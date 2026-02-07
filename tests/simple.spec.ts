@@ -456,20 +456,8 @@ test('eval after 1st solve after invalidation does NOT say no model', async ({ p
 
 const set_timeout = async (page: Page, total_seconds: number): Promise<void> => {
   const timeout_e = page.getByTestId(TestId.timeout.id)
-  const hours_e = timeout_e.getByTestId(TestId.timeout.hours)
-  const minutes_e = timeout_e.getByTestId(TestId.timeout.minutes)
   const seconds_e = timeout_e.getByTestId(TestId.timeout.seconds)
-
-  let leftover = total_seconds
-  const hours = Math.floor(leftover / (60 * 60))
-  leftover -= hours * (60 * 60)
-  const minutes = Math.floor(leftover / 60)
-  leftover -= minutes * 60
-  const seconds = leftover
-
-  hours_e.fill(hours.toString())
-  minutes_e.fill(minutes.toString())
-  seconds_e.fill(seconds.toString())
+  await seconds_e.fill(total_seconds.toString())
 }
 
 test('eval during 2nd solve says no model then updates correctly with model', { tag: '@slow' }, async ({ page }) => {

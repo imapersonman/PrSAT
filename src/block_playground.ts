@@ -336,6 +336,11 @@ export const generic_input_block = <ParseOutput extends {}>(
   const copy_message_container = el('span', { style: 'margin-left: 0.4em;', class: 'copy-message' }, 'Copied Constraints!')
   const show_batch_button = button('', {}, test_ids.toggle)
 
+  const clear_button = button('Clear', { style: 'margin-left: 0.4em;' })
+  clear_button.onclick = async () => {
+    await block.set_fields([''])
+  }
+
   const show_batch_block = new Editable(true)
   make_hideable(batch_block.element, show_batch_block)
   show_batch_button.onclick = () => {
@@ -385,6 +390,7 @@ export const generic_input_block = <ParseOutput extends {}>(
       el('div', { style: 'margin-bottom: 0.4em;' },
         load_button,
         show_batch_button,
+        clear_button,
       ),
       batch_block.element,
     ),

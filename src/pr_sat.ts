@@ -36,7 +36,7 @@ export const real_expr_builder = {
   divide: (numerator: RealExpr, denominator: RealExpr): RealExprMap['divide'] => ({ tag: 'divide', numerator, denominator }),
   power: (base: RealExpr, exponent: RealExpr): RealExprMap['power'] => ({ tag: 'power', base, exponent }),
 }
-const { svs, lit, minus, plus } = real_expr_builder
+const { svs, lit, minus, plus, pr } = real_expr_builder
 // const { state_variable_sum: svs, literal: lit } = PrSatFuncs.inits.RealExpr
 
 export const constraint_builder = {
@@ -647,9 +647,9 @@ const real_expr_to_gen_string = (expr: RealExpr, s2s: (s: Sentence) => string): 
     if (expr.indices.length === 0) {
       return '0'
     } else if (expr.indices.length === 1) {
-      return `s_${expr.indices[0]}`
+      return `a_${expr.indices[0] + 1}`
     } else {
-      return expr.indices.map((i) => `s_${i}`).join(' + ')
+      return expr.indices.map((i) => `a_${i + 1}`).join(' + ')
     }
   } else if (expr.tag === 'divide') {
     return `${wrap(expr.numerator)} / ${wrap(expr.denominator)}`
@@ -778,7 +778,8 @@ export const div0_conditions_in_real_expr = (expr: RealExpr): Constraint[] => {
   } else if (expr.tag === 'probability') {
     return []
   } else if (expr.tag === 'given_probability') {
-    return []
+    // Conditional probability Pr(A|B) = Pr(A&B)/Pr(B) is undefined when Pr(B) = 0
+    return [cnot(eq(pr(expr.given), lit(0)))]
   } else if (expr.tag === 'state_variable_sum') {
     return []
   } else if (expr.tag === 'negative') {
@@ -1252,7 +1253,7 @@ export const constraint_to_smtlib = (constraint: Constraint): S => {
 }
 
 export const state_index_id = (state_index: number): string => {
-  return `s_${state_index}`
+  return `a_${state_index + 1}`
 }
 
 export const real_expr_to_smtlib = (expr: RealExpr): S => {
