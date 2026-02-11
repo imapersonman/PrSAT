@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run dev:*)",
+      "Bash(npm install)",
+      "Bash(open http://localhost:5173/)",
+      "Bash(npm run build:*)",
+      "Bash(npm run preview:*)",
+      "Bash(npx vite preview --host)",
+      "WebFetch(domain:imapersonman.github.io)",
+      "Bash(open:*)",
+      "Bash(npm view:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run copy-files:*)",
+      "Bash(grep:*)",
+      "Bash(npm test)",
+      "Bash(lsof:*)",
+      "Bash(pkill:*)",
+      "Bash(pgrep:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx vitest:*)"
+    ]
+  }
+}

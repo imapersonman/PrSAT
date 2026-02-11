@@ -142,10 +142,13 @@ export const fancy_evaluate_constraint_or_real_expr = async <CtxKey extends stri
   }
 
   const div0_constraints = div0_conditions_in_constraint_or_real_expr(c_or_re)
+  const index_to_eliminate = tt.n_states() - 1  // TODO: put this in a function.
   for (const c of div0_constraints) {
     const translated = translate_constraint(tt, c)
-    const z3_expr = constraint_to_bool(ctx, model, translated)
-    const result = model.eval(z3_expr)
+    const [_, eliminated] = eliminate_state_variable_index_in_constraint_or_real_expr(tt.n_states(), index_to_eliminate, { tag: 'constraint', constraint: translated })
+    if (eliminated.tag !== 'constraint') throw new Error('Expected constraint after elimination')
+    const z3_expr = constraint_to_bool(ctx, model, eliminated.constraint)
+    const result = model.eval(z3_expr, true)  // true = model_completion to evaluate eliminated variables
     if (result.sexpr() === 'false') {
       // found a denominator equal to zero!
       return { tag: 'div0' }
@@ -153,7 +156,6 @@ export const fancy_evaluate_constraint_or_real_expr = async <CtxKey extends stri
   }
 
   const translated_c_or_re = translate_constraint_or_real_expr(tt, c_or_re)
-  const index_to_eliminate = tt.n_states() - 1  // TODO: put this in a function.
   const [_, eliminated] = eliminate_state_variable_index_in_constraint_or_real_expr(tt.n_states(), index_to_eliminate, translated_c_or_re)
   const to_evaluate_z3 = constraint_or_real_expr_to_z3_expr(ctx, model, eliminated)
   if (c_or_re.tag === 'constraint') {
@@ -501,10 +503,12 @@ export const model_to_assigned_exprs = async <CtxKey extends string>(ctx: Contex
       throw new Error(`Expected model entry name to be of length at least 3!\nname: ${name.length}`)
     }
     const index_str = name.substring(2)
-    const index = parseInt(index_str)
-    if (isNaN(index)) {
-      throw new Error(`Expected model entry name to be of the form s_<number>!\nname: ${name}`)
+    const parsed_index = parseInt(index_str)
+    if (isNaN(parsed_index)) {
+      throw new Error(`Expected model entry name to be of the form a_<number>!\nname: ${name}`)
     }
+    // Variable names are 1-indexed (a_1, a_2, ...) but internal indices are 0-indexed
+    const index = parsed_index - 1
 
     assigned_exprs.push([index, await ctx.simplify(model.eval(decl.call()))])
   }
@@ -555,8 +559,8 @@ export const real_expr_to_arith = <CtxKey extends string>(ctx: Context<CtxKey>, 
     if (expr.indices.length === 0) {
       return ctx.Real.val(0)
     } else {
-      const first_var_expr = model.eval(ctx.Const(state_index_id(assert_exists(expr.indices[0], 'Missing expr.indices[0] for some reason!')), ctx.Real.sort()))
-      const rest_var_exprs = expr.indices.slice(1).map((state_index) => (ctx.Const(state_index_id(state_index), ctx.Real.sort())))
+      const first_var_expr = ctx.Const(state_index_id(expr.indices[0]), ctx.Real.sort())
+      const rest_var_exprs = expr.indices.slice(1).map((state_index) => ctx.Const(state_index_id(state_index), ctx.Real.sort()))
       return ctx.Sum(first_var_expr, ...rest_var_exprs)
     }
   } else if (expr.tag === 'variable') {
@@ -702,6 +706,7 @@ type SolverOptions2 = {
   regular: boolean
   abort_signal?: AbortSignal
   cancel_fallback?: () => Promise<undefined>
+  onTranslated?: (translated: Constraint[]) => void
 }
 
 const DEFAULT_SOLVER_OPTIONS2: SolverOptions2 = {
@@ -726,9 +731,10 @@ export const pr_sat_wrapped = async (
   constraints: Constraint[],
   options?: Partial<SolverOptions2>,
 ): Promise<PrSATResult> => {
-  const { regular, abort_signal, cancel_fallback } = { ...DEFAULT_SOLVER_OPTIONS2, ...(options ?? {}) }
+  const { regular, abort_signal, cancel_fallback, onTranslated } = { ...DEFAULT_SOLVER_OPTIONS2, ...(options ?? {}) }
 
   const translated = translate(tt, constraints)
+  onTranslated?.(translated)
   const index_to_eliminate = tt.n_states() - 1  // Only this works right now!
   const enriched_constraints = enrich_constraints(tt, index_to_eliminate, regular, translated)
   const [redef, elim_constraints] = eliminate_state_variable_index(tt.n_states(), index_to_eliminate, enriched_constraints)
@@ -894,6 +900,8 @@ export class WrappedSolver {
 
       },
       async () => {  // on_cancel
+        // Reinitialize Z3 after any cancel - the context may be in a bad state after interrupt
+        await this.reinitialize()
         return { status: 'cancelled' }
       },
       async () => {  // on_slow_cancel

@@ -15,6 +15,7 @@ import * as Constants from './constants'
 
 import './style.css'
 import { download } from './download';
+import * as htmlToImage from 'html-to-image';
 
 const root = assert_exists(document.getElementById('app'), 'Root element with id \'#app\' doesn\'t exist!')
 
@@ -626,37 +627,129 @@ const display_polynomial = (coefficients: number[]): Node => {
   return final_node
 }
 
-const number_to_model_assignment_output = (n: number): ModelAssignmentOutput => {
-  if (n < 0) {
-    return { tag: 'negative', inner: { tag: 'literal', value: -n } }
-  } else {
-    return { tag: 'literal', value: n }
+// Helper functions for simplifying quadratic roots
+const gcd = (a: number, b: number): number => {
+  a = Math.abs(a)
+  b = Math.abs(b)
+  while (b !== 0) {
+    const t = b
+    b = a % b
+    a = t
   }
+  return a
+}
+
+const gcd3 = (a: number, b: number, c: number): number => gcd(gcd(a, b), c)
+
+// Extract largest perfect square factor: returns [k, m] where n = k² * m and m is square-free
+const extractPerfectSquare = (n: number): [number, number] => {
+  if (n <= 0) return [0, 0]
+  let k = 1
+  let m = n
+  for (let i = 2; i * i <= m; i++) {
+    while (m % (i * i) === 0) {
+      k *= i
+      m /= (i * i)
+    }
+  }
+  return [k, m]
+}
+
+type SimplifiedQuadratic = {
+  // Represents (numeratorConstant + numeratorSqrtCoeff * √squareFree) / denominator
+  numeratorConstant: number
+  numeratorSqrtCoeff: number
+  squareFree: number
+  denominator: number
+  decimalValue: number
+}
+
+// Simplify (-b ± √(b² - 4ac)) / 2a
+const simplifyQuadraticRoot = (a: number, b: number, c: number, index: number): SimplifiedQuadratic => {
+  const discriminant = b * b - 4 * a * c
+  if (discriminant < 0) {
+    throw new Error('Negative discriminant - complex roots')
+  }
+
+  const [sqrtFactor, squareFree] = extractPerfectSquare(discriminant)
+  // √discriminant = sqrtFactor * √squareFree
+
+  // Root is (-b ± sqrtFactor * √squareFree) / (2a)
+  const sign = index === 1 ? -1 : 1
+  let numeratorConstant = -b
+  let numeratorSqrtCoeff = sign * sqrtFactor
+  let denominator = 2 * a
+
+  // Handle negative denominator (keep it positive)
+  if (denominator < 0) {
+    numeratorConstant = -numeratorConstant
+    numeratorSqrtCoeff = -numeratorSqrtCoeff
+    denominator = -denominator
+  }
+
+  // Find GCD and simplify
+  const g = gcd3(Math.abs(numeratorConstant), Math.abs(numeratorSqrtCoeff), denominator)
+  numeratorConstant /= g
+  numeratorSqrtCoeff /= g
+  denominator /= g
+
+  // Compute decimal value
+  const decimalValue = (-b + sign * Math.sqrt(discriminant)) / (2 * a)
+
+  return { numeratorConstant, numeratorSqrtCoeff, squareFree, denominator, decimalValue }
 }
 
 const model_assignment_display = (ma: ModelAssignmentOutput): Node => {
-  const wrap = (ma: ModelAssignmentOutput): Node => {
-    if (ma.tag === 'negative') {
-      const lp = math_el('mo', {}, '(')
-      const rp = math_el('mo', {}, ')')
-      return math_el('mrow', {}, lp, sub(ma), rp)
-    } else {
-      return sub(ma)
-    }
-  }
-  const quad_root_to_display = (a: ModelAssignmentOutput, b: ModelAssignmentOutput, c: ModelAssignmentOutput, index: number): Node => {
-    const b_2 = math_el('msup', {}, wrap(b), math_el('mi', {}, '2'))
-    const _4ac = math_el('mrow', {},
-      math_el('mi', {}, '4'),
-      math_el('mo', {}, '*'), wrap(a),
-      math_el('mo', {}, '*'), wrap(c))
-    const det = math_el('mrow', {}, b_2, math_el('mo', {}, '-'), _4ac)
-    const sqrt_det = math_el('msqrt', {}, det)
+  const quad_root_to_display = (aCoeff: number, bCoeff: number, cCoeff: number, index: number): Node => {
     assert(index === 1 || index === 2, `Expected root-obj index to equal 1 or 2!\nactual: ${index}`)
-    const pm = math_el('mo', {}, index === 1 ? '-' : '+')
-    const num = math_el('mrow', {}, math_el('mrow', {}, math_el('mo', {}, '-'), wrap(b)), pm, sqrt_det)
-    const den = math_el('mrow', {}, math_el('mi', {}, '2'), math_el('mo', {}, '*'), wrap(a))
-    return math_el('mfrac', {}, num, den)
+    const { numeratorConstant, numeratorSqrtCoeff, squareFree, denominator, decimalValue } =
+      simplifyQuadraticRoot(aCoeff, bCoeff, cCoeff, index)
+
+    // Special case: discriminant is a perfect square (squareFree === 1) - result is rational
+    if (squareFree === 1) {
+      const rationalValue = (numeratorConstant + numeratorSqrtCoeff) / denominator
+      if (Number.isInteger(rationalValue)) {
+        return math_el('mn', {}, rationalValue.toString())
+      }
+      return math_el('mfrac', {},
+        math_el('mn', {}, (numeratorConstant + numeratorSqrtCoeff).toString()),
+        math_el('mn', {}, denominator.toString()))
+    }
+
+    // Build the sqrt part: √squareFree or coefficient * √squareFree
+    const sqrtPart = math_el('msqrt', {}, math_el('mn', {}, squareFree.toString()))
+    const absSqrtCoeff = Math.abs(numeratorSqrtCoeff)
+    const sqrtTerm = absSqrtCoeff === 1
+      ? sqrtPart
+      : math_el('mrow', {}, math_el('mn', {}, absSqrtCoeff.toString()), sqrtPart)
+
+    // Build numerator: constant ± sqrt term
+    let numerator: Node
+    if (numeratorConstant === 0) {
+      // Just the sqrt term (possibly negated)
+      numerator = numeratorSqrtCoeff < 0
+        ? math_el('mrow', {}, math_el('mo', {}, '-'), sqrtTerm)
+        : sqrtTerm
+    } else {
+      const constPart = math_el('mn', {}, numeratorConstant.toString())
+      const op = math_el('mo', {}, numeratorSqrtCoeff < 0 ? '-' : '+')
+      numerator = math_el('mrow', {}, constPart, op, sqrtTerm)
+    }
+
+    // Build the exact form (with or without denominator)
+    let exactForm: Node
+    if (denominator === 1) {
+      exactForm = numerator
+    } else {
+      exactForm = math_el('mfrac', {}, numerator, math_el('mn', {}, denominator.toString()))
+    }
+
+    // Add decimal approximation
+    const approx = math_el('mrow', {},
+      math_el('mo', { style: 'padding-left: 0.3em' }, '≈'),
+      math_el('mn', {}, decimalValue.toFixed(4)))
+
+    return math_el('mrow', {}, exactForm, approx)
   }
   const sub = (ma: ModelAssignmentOutput): Node => {
     if (ma.tag === 'literal') {
@@ -666,16 +759,22 @@ const model_assignment_display = (ma: ModelAssignmentOutput): Node => {
     } else if (ma.tag === 'rational') {
       return math_el('mfrac', {}, sub(ma.numerator), sub(ma.denominator))
     } else if (ma.tag === 'root-obj') {
-      return quad_root_to_display(ma.a, ma.b, ma.c, ma.index)
+      // Legacy case - extract numeric values from ModelAssignmentOutput
+      const extractValue = (m: ModelAssignmentOutput): number => {
+        if (m.tag === 'literal') return m.value
+        if (m.tag === 'negative' && m.inner.tag === 'literal') return -m.inner.value
+        throw new Error('Cannot extract numeric value from complex ModelAssignmentOutput')
+      }
+      return quad_root_to_display(extractValue(ma.a), extractValue(ma.b), extractValue(ma.c), ma.index)
     } else if (ma.tag === 'unknown') {
       return math_el('mtext', {}, s_to_string(ma.s))
       // return math_el('mtext', {}, 'something!')
     } else if (ma.tag === 'generic-root-obj') {
       if (ma.degree === 2) {
         return quad_root_to_display(
-          number_to_model_assignment_output(ma.coefficients[0]),
-          number_to_model_assignment_output(ma.coefficients[1]),
-          number_to_model_assignment_output(ma.coefficients[2]),
+          ma.coefficients[0],
+          ma.coefficients[1],
+          ma.coefficients[2],
           ma.index)
       }
       // return sub({ tag: 'unknown', s: ['root-obj', poly_s(ma.coefficients), ma.index.toString()] })
@@ -698,23 +797,22 @@ const truth_table_display = (tt: TruthTable): HTMLElement => {
   const body = el('tbody', {})
   const head_row = el('tr', {})
   const head = el('thead', {}, head_row)
-  for (const l of tt.letters()) {
-    head_row.appendChild(el('th', {}, letter_string(l)))
-  }
-  head_row.appendChild(el('th', { class: 'dv' }))
+  const letters = Array.from(tt.letters())
+  letters.forEach((l, idx) => {
+    const isLast = idx === letters.length - 1
+    head_row.appendChild(el('th', isLast ? { class: 'dv' } : {}, letter_string(l)))
+  })
   head_row.appendChild(el('th', {}, state_id('i')))
-  head_row.appendChild(el('th', { class: 'dv' }))
 
   for (const state_index of tt.state_indices()) {  // rows
     const row = el('tr', {})
-    for (const l of tt.letters()) {
+    letters.forEach((l, idx) => {
+      const isLast = idx === letters.length - 1
       const letter_value = tt.letter_value_from_index(l, state_index)
       const value_string = letter_value ? '⊤' : '⊥'
-      row.appendChild(el('td', {}, value_string))
-    }
-    row.appendChild(el('td', { class: 'dv' }))
-    row.appendChild(el('td', {}, state_id(state_index)))
-    row.appendChild(tel(TestId.state_row.state(state_index), 'td', { class: 'dv' }))
+      row.appendChild(el('td', isLast ? { class: 'dv' } : {}, value_string))
+    })
+    row.appendChild(tel(TestId.state_row.state(state_index), 'td', {}, state_id(state_index)))
     body.appendChild(row)
   }
   const e = el('table', {},
@@ -730,26 +828,25 @@ const model_display = (tt: TruthTable, model_assignments: Record<number, ModelAs
   const body = el('tbody', {})
   const head_row = el('tr', {})
   const head = el('thead', {}, head_row)
-  for (const l of tt.letters()) {
-    head_row.appendChild(el('th', {}, letter_string(l)))
-  }
-  head_row.appendChild(el('th', { class: 'dv' }))
-  head_row.appendChild(el('th', {}, state_id('i')))
-  head_row.appendChild(el('th', { class: 'dv' }))
+  const letters = Array.from(tt.letters())
+  letters.forEach((l, idx) => {
+    const isLast = idx === letters.length - 1
+    head_row.appendChild(el('th', isLast ? { class: 'dv' } : {}, letter_string(l)))
+  })
+  head_row.appendChild(el('th', { class: 'dv' }, state_id('i')))
   head_row.appendChild(el('th', {}, 'Assignment'))
 
   for (const [i, ma] of Object.entries(model_assignments)) {  // rows
     const state_index = parseInt(i)
     const assignment_html = model_assignment_display(ma)
     const row = el('tr', {})
-    for (const l of tt.letters()) {
+    letters.forEach((l, idx) => {
+      const isLast = idx === letters.length - 1
       const letter_value = tt.letter_value_from_index(l, state_index)  // Scary parseInt!
       const value_string = letter_value ? '⊤' : '⊥'
-      row.appendChild(el('td', {}, value_string))
-    }
-    row.appendChild(el('td', { class: 'dv' }))
-    row.appendChild(el('td', {}, state_id(state_index)))
-    row.appendChild(tel(TestId.state_row.state(state_index), 'td', { class: 'dv' }))
+      row.appendChild(el('td', isLast ? { class: 'dv' } : {}, value_string))
+    })
+    row.appendChild(tel(TestId.state_row.state(state_index), 'td', { class: 'dv' }, state_id(state_index)))
     row.appendChild(tel(TestId.state_row.value(state_index), 'td', {}, assignment_html))
     body.appendChild(row)
   }
@@ -962,8 +1059,22 @@ const model_evaluators = (
     }
   }
 
+  const clear_all = async () => {
+    // Remove all inputs except the first one, then clear the first
+    const inputs = [...eval_block.get_inputs()]
+    for (let i = inputs.length - 1; i > 0; i--) {
+      inputs[i].remove()
+    }
+    if (inputs.length > 0) {
+      await inputs[0].text.set('')
+    }
+  }
+
+  const clear_button = el('input', { type: 'button', value: 'Clear', style: 'margin-left: 0.5em;' }) as HTMLButtonElement
+  clear_button.onclick = () => clear_all()
+
   const element = el('div', { class: 'model-evaluators' },
-    el('div', { style: 'margin-bottom: 0.4em;' }, 'Evaluate model'),
+    el('div', { style: 'margin-bottom: 0.4em;' }, 'Evaluate model', clear_button),
     mi.element,
   )
   return { element, refresh  }
@@ -1000,58 +1111,26 @@ const seconds_to_time_string = (total_seconds: number) => {
 }
 
 const timeout = (timeout_ms: Editable<number>) => {
-  const MIN_HRS = 0
-  const MAX_HRS = 2
-  const MIN_MNS = 0
-  const MAX_MNS = 59
-  const MIN_SCS = 0
-  const MAX_SCS = 59
+  const MIN_SECS = 1
+  const MAX_SECS = 3600
+  const default_secs = Math.round(timeout_ms.get() / 1000)
 
-  const { h, m, s } = seconds_to_hms(timeout_ms.get() / 1000)
-  const DEF_HRS = h
-  const DEF_MNS = m
-  const DEF_SCS = s
-
-  const hi = tel(TestId.timeout.hours, 'input', { style: 'margin-right: 0.5ch; margin-bottom: 0.1ch;', type: 'number', min: MIN_HRS.toString(), max: MAX_HRS.toString(), value: DEF_HRS.toString() }) as HTMLInputElement
-  const mi = tel(TestId.timeout.minutes, 'input', { style: 'margin-right: 0.5ch; margin-bottom: 0.1ch', type: 'number', min: MIN_MNS.toString(), max: MAX_MNS.toString(), value: DEF_MNS.toString() }) as HTMLInputElement
-  const si = tel(TestId.timeout.seconds, 'input', { style: 'margin-right: 0.5ch;', type: 'number', min: MIN_SCS.toString(), max: MAX_SCS.toString(), value: DEF_SCS.toString() }) as HTMLInputElement
+  const si = tel(TestId.timeout.seconds, 'input', { style: 'margin-right: 0.5ch; width: 5ch;', type: 'number', min: MIN_SECS.toString(), max: MAX_SECS.toString(), value: default_secs.toString() }) as HTMLInputElement
 
   const set_timeout_ms = () => {
-    const h = parseInt(hi.value)
-    const m = parseInt(mi.value)
     const s = parseInt(si.value)
-    const ms = s * 1000 + m * 60 * 1000 + h * 60 * 60 * 1000
-    timeout_ms.set(ms)
-  }
-
-  // we're overriding the initial setting because why not?
-  set_timeout_ms()
-
-  hi.onchange = () => {
-    const parsed = parseInt(hi.value)
-    const value = Math.min(parsed, MAX_HRS)
-    hi.value = value.toString()
-    set_timeout_ms()
-  }
-
-  mi.onchange = () => {
-    const parsed = parseInt(mi.value)
-    const value = Math.min(parsed, MAX_MNS)
-    mi.value = value.toString()
-    set_timeout_ms()
+    timeout_ms.set(s * 1000)
   }
 
   si.onchange = () => {
     const parsed = parseInt(si.value)
-    const value = Math.min(parsed, MAX_SCS)
+    const value = Math.max(MIN_SECS, Math.min(parsed, MAX_SECS))
     si.value = value.toString()
     set_timeout_ms()
   }
 
-  return tel(TestId.timeout.id, 'div', {},
-    el('label', { style: 'display: block;' }, hi, 'hour(s)'),
-    el('label', { style: 'display: block;' }, mi, 'minute(s)'),
-    el('label', { style: 'display: block;' }, si, 'second(s)'),
+  return tel(TestId.timeout.id, 'div', { style: 'display: inline;' },
+    el('label', {}, si, 'seconds'),
   )
 }
 
@@ -1338,9 +1417,9 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
   })().catch(() => {})
 
   const cancel_fallback = async (): Promise<undefined> => {
-    console.log('cancel fallback')
-    localStorage.setItem('constraints', constraint_block.get_fields().join('\n'))
-    window.location.reload()  // boooooooooooooooo!
+    // No longer reload the page - just let Z3 reinitialize
+    // The translated constraints and truth table will remain visible
+    console.log('cancel fallback (no reload)')
   }
 
   const start_search_solver = async (solver: WrappedSolver, constraints: Constraint[], is_regular: boolean): Promise<void> => {
@@ -1354,7 +1433,18 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
       model_container.appendChild(tt_display)
       // const { status, all_constraints, state_values, model } = await pr_sat_with_truth_table(ctx, truth_table, constraints, is_regular)
       // const result = await pr_sat_with_options(ctx, truth_table, constraints, { regular: is_regular, timeout_ms: timeout_ms.get() })
-      const result = await pr_sat_wrapped(solver, truth_table, constraints, { regular: is_regular, abort_signal: abort_controller.signal, cancel_fallback })
+      const result = await pr_sat_wrapped(solver, truth_table, constraints, {
+        regular: is_regular,
+        abort_signal: abort_controller.signal,
+        cancel_fallback,
+        onTranslated: (translated) => {
+          constraints_view.innerHTML = ''
+          for (const constraint of translated) {
+            const e = constraint_to_html(constraint, true)
+            constraints_view.appendChild(el('div', { style: 'margin-top: 0.4em;' }, e))
+          }
+        }
+      })
       state2.set({ tag: 'finished', truth_table, solver_output: result })
       // const { status, all_constraints, model } = result
       // if (result.solver_output.status === 'sat') {
@@ -1369,8 +1459,8 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
       //   fallthrough('start_search_solver', status)
       // }
 
-      constraints_view.innerHTML = ''
-
+      // Add save buttons at the top (constraints already displayed by onTranslated callback)
+      // These buttons always appear regardless of solver result
       const save_translated_constraints_button = el('input', { type: 'button', value: 'Save translated constraints' })
       save_translated_constraints_button.onclick = () =>
         download(result.constraints.translated.map(constraint_to_string).join('\n'), 'translated.txt', 'text/plain')
@@ -1379,13 +1469,43 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
       save_smtlib_button.onclick = () =>
         download(result.smtlib_input, 'smtlib.txt', 'text/plain')
 
-      const result_save_button_bar = el('span', {}, save_translated_constraints_button, save_smtlib_button)
-      constraints_view.appendChild(result_save_button_bar)
+      const result_save_button_bar = el('div', {},
+        el('div', {}, save_translated_constraints_button, save_smtlib_button),
+      )
 
-      for (const constraint of result.constraints.translated) {
-        const e = constraint_to_html(constraint, true)
-        constraints_view.appendChild(el('div', { style: 'margin-top: 0.4em;' }, e))
+      // Only add the table image button if we have a SAT result (model/table exists)
+      if (result.solver_output.status === 'sat') {
+        const save_table_image_button = el('input', { type: 'button', value: 'Save table as image' }) as HTMLButtonElement
+        save_table_image_button.onclick = async () => {
+          try {
+            // Add temporary padding to prevent cutoff
+            const originalPadding = model_container.style.paddingBottom
+            model_container.style.paddingBottom = '20px'
+
+            const dataUrl = await htmlToImage.toPng(model_container, {
+              backgroundColor: '#ffffff',
+              pixelRatio: 2, // Higher quality
+            })
+
+            // Restore original padding
+            model_container.style.paddingBottom = originalPadding
+
+            const a = document.createElement('a')
+            a.href = dataUrl
+            a.download = 'probability_table.png'
+            document.body.appendChild(a)
+            a.click()
+            document.body.removeChild(a)
+          } catch (e: any) {
+            console.error('Failed to save table as image:', e)
+            alert('Failed to save table: ' + e.message)
+          }
+        }
+        save_table_image_button.style.marginTop = '0.4em'
+        result_save_button_bar.appendChild(el('div', {}, save_table_image_button))
       }
+
+      constraints_view.insertBefore(result_save_button_bar, constraints_view.firstChild)
     }
     catch (e: any) {
       state2.set({ tag: 'exception', message: e.message })
@@ -1411,6 +1531,8 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
     const last_state = state2.get()
     if (last_state.tag === 'invalidated') {
       // do nothing!
+    } else if (last_state.tag === 'looking') {
+      // Don't invalidate while a search is in progress (e.g., during Z3 reinitialize on cancel)
     } else if (last_state.tag === 'finished') {
       state2.set({ tag: 'invalidated', last: last_state })
     } else {
@@ -1517,6 +1639,7 @@ const model_finder_display = (constraint_block: InputBlockLogic<Constraint, Spli
       state_display.append('No up-to-date model to display')
       model_part.classList.add('invalidated')
     } else if (state.tag === 'exception') {
+      generate_button.disabled = false
     } else {
       fallthrough('model_finder_display.state.watch', state)
     }
@@ -1696,12 +1819,26 @@ const main = (): HTMLElement => {
     show_error(JSON.stringify(event.reason))
   }
 
-  window.onerror = (event) => {
+  window.onerror = (event, source, lineno, colno, error) => {
+    let message: string
     if (typeof event === 'string') {
-      show_error(event)
+      message = event
+    } else if (error instanceof Error) {
+      message = error.message
+    } else if (event instanceof Event && 'message' in event) {
+      message = String((event as ErrorEvent).message)
     } else {
-      show_error(JSON.stringify(event))
+      // For resource load errors, provide a more helpful message
+      if (source && source.includes('z3')) {
+        message = 'Failed to load Z3 WebAssembly module. This may be due to iOS Safari limitations with large WebAssembly files. Try using a desktop browser.'
+      } else {
+        message = 'A resource failed to load'
+      }
     }
+    if (source) {
+      message += ` (at ${source}:${lineno}:${colno})`
+    }
+    show_error(message)
   }
 
   // const throw_button = el('input', { type: 'button', value: 'Throw' })
@@ -1711,21 +1848,20 @@ const main = (): HTMLElement => {
 
   return el('div', {},
     el('div', { class: 'header' },
-      el('div', { style: 'font-weight: bold;' }, 'PrSAT 3.0b: The Probability Table Generator (Beta)'),
+      el('div', { style: 'font-weight: bold; font-size: 1.5em;' }, 'PrSAT 3.0'),
       el('br', {}),
-      el('div', {}, 'PrSAT 3.0 is an open source, ASCII/web based probability table generator.'),
-      el('div', {}, 'It runs on any modern browser, and requires no additional software.'),
-      el('div', {}, 'It takes (arbitrary) sets of statements in probability calculus as input (in ASCII format).'),
-      el('div', {}, 'If the set is satisfiable, it will return a probability distribution (in the form of a probability table).'),
-      el('div', {}, 'If not, it will return "unsatisfiable."'),
-      el('br', {}),
-      el('div', {}, 'As the software is in Beta it is incomplete and there WILL be bugs.'),
       el('div', {},
-        'Email descriptions of issues you\'ve encountered or features you\'d like to see to ',
-        el('a', { href: 'mailto:adjorlolo.k@northeastern.edu' }, 'Koissi Adjorlolo'),
-        '.'),
+        'For more information regarding syntax, usage, etc., see the ',
+        el('a', { href: 'https://fitelson.org/PrSAT/', target: '_blank' }, 'official PrSAT 3.0 webpage'),
+        '.',
+      ),
       el('br', {}),
-      el('div', {}, el('a', { href: 'https://youtu.be/IGHjYUI0CL4' }, 'Here is a brief video demo of the software'), '.'),
+      el('div', {},
+        el('a', { href: 'https://youtu.be/F_WbzKr7qJQ', target: '_blank' }, 'Here'),
+        ' is a brief video demo of the software. The text file for the demo can be downloaded ',
+        el('a', { href: 'https://fitelson.org/PrSAT/PrSAT_3.0_demo_examples.txt', target: '_blank' }, 'here'),
+        '.',
+      ),
     ),
     // throw_button,
     global_error_display,
